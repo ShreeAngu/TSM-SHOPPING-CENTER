@@ -19,9 +19,10 @@ import {
 
 interface SettingsTabProps {
   locations: Location[];
+  isEditor?: boolean;
 }
 
-export default function SettingsTab({ locations }: SettingsTabProps) {
+export default function SettingsTab({ locations, isEditor = false }: SettingsTabProps) {
   // Determine current active counts from locations
   const currentWarehouseCount = locations.filter(l => l.type === 'warehouse').length;
   const currentStoreCount = locations.filter(l => l.type === 'store').length;
@@ -100,11 +101,14 @@ export default function SettingsTab({ locations }: SettingsTabProps) {
                 {[1, 2, 3, 4].map(n => (
                   <button
                     key={`wh-select-${n}`}
-                    onClick={() => setWarehouseCount(n)}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                      warehouseCount === n
-                        ? 'bg-slate-900 border-slate-900 text-white shadow-xs'
-                        : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-600'
+                    onClick={() => { if (isEditor) setWarehouseCount(n); }}
+                    disabled={!isEditor}
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all ${
+                      !isEditor 
+                        ? (warehouseCount === n ? 'bg-slate-200 border-slate-300 text-slate-400 cursor-not-allowed' : 'bg-slate-50 border-slate-150 text-slate-300 cursor-not-allowed')
+                        : (warehouseCount === n
+                          ? 'bg-slate-900 border-slate-900 text-white shadow-xs cursor-pointer'
+                          : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-600 cursor-pointer')
                     }`}
                   >
                     {n}
@@ -130,11 +134,14 @@ export default function SettingsTab({ locations }: SettingsTabProps) {
                 {[1, 2, 3, 4, 5, 6].map(n => (
                   <button
                     key={`st-select-${n}`}
-                    onClick={() => setStoreCount(n)}
-                    className={`flex-1 min-w-[40px] py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                      storeCount === n
-                        ? 'bg-slate-900 border-slate-900 text-white shadow-xs'
-                        : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-600'
+                    onClick={() => { if (isEditor) setStoreCount(n); }}
+                    disabled={!isEditor}
+                    className={`flex-1 min-w-[40px] py-2 rounded-xl text-xs font-bold border transition-all ${
+                      !isEditor
+                        ? (storeCount === n ? 'bg-slate-200 border-slate-300 text-slate-400 cursor-not-allowed' : 'bg-slate-50 border-slate-150 text-slate-300 cursor-not-allowed')
+                        : (storeCount === n
+                          ? 'bg-slate-900 border-slate-900 text-white shadow-xs cursor-pointer'
+                          : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-600 cursor-pointer')
                     }`}
                   >
                     {n}
@@ -142,6 +149,16 @@ export default function SettingsTab({ locations }: SettingsTabProps) {
                 ))}
               </div>
             </div>
+
+            {/* Read-Only Mode Warning banner */}
+            {!isEditor && (
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3.5 flex items-start gap-2.5 text-[11px] text-amber-800 leading-relaxed shadow-3xs" id="read-only-settings-banner">
+                <AlertCircle className="h-4.5 w-4.5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold">Read-Only Mode:</span> Scaling TSM nodes is restricted. Log in using an authorized Google Sign-In account (shreeanguarunachalam@gmail.com or surechuchi@gmail.com) in the left sidebar to change active nodes.
+                </div>
+              </div>
+            )}
 
             {/* Sync feedback notifications */}
             {syncSuccess && (
@@ -168,8 +185,12 @@ export default function SettingsTab({ locations }: SettingsTabProps) {
             <div className="border-t border-slate-50 pt-4">
               <button
                 onClick={handleApplyChanges}
-                disabled={isSyncing}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-400 text-white font-bold text-xs py-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-md shadow-indigo-600/10"
+                disabled={isSyncing || !isEditor}
+                className={`w-full font-bold text-xs py-3 rounded-xl transition-all flex items-center justify-center gap-2 ${
+                  !isEditor 
+                    ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                    : 'bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-400 text-white shadow-md shadow-indigo-600/10 cursor-pointer'
+                }`}
               >
                 {isSyncing ? (
                   <>
@@ -179,7 +200,7 @@ export default function SettingsTab({ locations }: SettingsTabProps) {
                 ) : (
                   <>
                     <RefreshCw className="h-4 w-4" />
-                    Apply Node Changes
+                    {isEditor ? "Apply Node Changes" : "Configuration Locked (Read-Only)"}
                   </>
                 )}
               </button>

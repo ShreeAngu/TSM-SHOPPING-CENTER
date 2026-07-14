@@ -11,7 +11,8 @@ import {
   Tag, 
   Layers,
   ArrowRight,
-  Info
+  Info,
+  AlertCircle
 } from 'lucide-react';
 import { CategoryTreeNode } from '../types';
 
@@ -19,9 +20,10 @@ interface CategoryTreeDeskProps {
   treeNodes: CategoryTreeNode[];
   onAddNode: (name: string, parentId: string | null) => Promise<void>;
   onDeleteNode: (id: string) => Promise<void>;
+  isEditor?: boolean;
 }
 
-export default function CategoryTreeDesk({ treeNodes, onAddNode, onDeleteNode }: CategoryTreeDeskProps) {
+export default function CategoryTreeDesk({ treeNodes, onAddNode, onDeleteNode, isEditor = false }: CategoryTreeDeskProps) {
   const [newRootName, setNewRootName] = useState('');
   const [activeParentAddId, setActiveParentAddId] = useState<string | null>(null);
   const [childNodeName, setChildNodeName] = useState('');
@@ -86,29 +88,31 @@ export default function CategoryTreeDesk({ treeNodes, onAddNode, onDeleteNode }:
             )}
           </div>
 
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              onClick={() => {
-                setActiveParentAddId(isAddingChild ? null : node.id);
-                setChildNodeName('');
-              }}
-              className="p-1 text-slate-400 hover:text-indigo-600 rounded-md hover:bg-slate-100 cursor-pointer transition-all"
-              title="Add sub-specification"
-            >
-              <FolderPlus className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={() => {
-                if (window.confirm(`Are you sure you want to delete "${node.name}" and all its subcategories?`)) {
-                  onDeleteNode(node.id);
-                }
-              }}
-              className="p-1 text-slate-400 hover:text-rose-600 rounded-md hover:bg-slate-100 cursor-pointer transition-all"
-              title="Delete node"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </div>
+          {isEditor && (
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                onClick={() => {
+                  setActiveParentAddId(isAddingChild ? null : node.id);
+                  setChildNodeName('');
+                }}
+                className="p-1 text-slate-400 hover:text-indigo-600 rounded-md hover:bg-slate-100 cursor-pointer transition-all"
+                title="Add sub-specification"
+              >
+                <FolderPlus className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => {
+                  if (window.confirm(`Are you sure you want to delete "${node.name}" and all its subcategories?`)) {
+                    onDeleteNode(node.id);
+                  }
+                }}
+                className="p-1 text-slate-400 hover:text-rose-600 rounded-md hover:bg-slate-100 cursor-pointer transition-all"
+                title="Delete node"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Form to add child under this node */}
@@ -169,22 +173,39 @@ export default function CategoryTreeDesk({ treeNodes, onAddNode, onDeleteNode }:
           </p>
         </div>
         
-        <form onSubmit={handleAddRoot} className="flex items-center gap-2 w-full md:w-auto shrink-0">
-          <input
-            type="text"
-            placeholder="Create New Root Node..."
-            value={newRootName}
-            onChange={(e) => setNewRootName(e.target.value)}
-            className="bg-slate-50 hover:bg-slate-100 border border-slate-200 focus:border-indigo-500 rounded-xl px-4 py-2 text-xs font-semibold shadow-2xs outline-hidden focus:ring-1 focus:ring-indigo-500 w-full sm:w-60"
-          />
-          <button
-            type="submit"
-            className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 cursor-pointer flex items-center gap-1 shrink-0 transition-all"
-          >
-            <Plus className="h-4 w-4" /> Root Class
-          </button>
-        </form>
+        {!isEditor ? (
+          <div className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded-xl select-none">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-ping" />
+            Read-Only Inspector
+          </div>
+        ) : (
+          <form onSubmit={handleAddRoot} className="flex items-center gap-2 w-full md:w-auto shrink-0">
+            <input
+              type="text"
+              placeholder="Create New Root Node..."
+              value={newRootName}
+              onChange={(e) => setNewRootName(e.target.value)}
+              className="bg-slate-50 hover:bg-slate-100 border border-slate-200 focus:border-indigo-500 rounded-xl px-4 py-2 text-xs font-semibold shadow-2xs outline-hidden focus:ring-1 focus:ring-indigo-500 w-full sm:w-60"
+            />
+            <button
+              type="submit"
+              className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 cursor-pointer flex items-center gap-1 shrink-0 transition-all"
+            >
+              <Plus className="h-4 w-4" /> Root Class
+            </button>
+          </form>
+        )}
       </div>
+
+      {/* Read-Only Status Notice Banner */}
+      {!isEditor && (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 flex items-center gap-3.5 text-xs text-amber-800 shadow-2xs" id="read-only-tree-banner">
+          <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
+          <div className="leading-relaxed">
+            <span className="font-bold">Read-Only Mode:</span> Classification tree hierarchy modifications are locked. Log in using an authorized Google Sign-In account (shreeanguarunachalam@gmail.com or surechuchi@gmail.com) in the left sidebar to add sub-specifications or delete classes.
+          </div>
+        </div>
+      )}
 
       {/* Main Grid: Visual Tree on Left, Usage documentation/Pathfinder on Right */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

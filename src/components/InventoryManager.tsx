@@ -26,6 +26,7 @@ interface InventoryManagerProps {
   onAddProduct: (product: Omit<Product, 'id'>) => void;
   onAddVariety: (variety: Omit<ProductVariety, 'id'>, initialStocks: Record<string, number>) => void;
   onDeleteVariety: (varietyId: string) => void;
+  isEditor?: boolean;
 }
 
 export default function InventoryManager({
@@ -35,7 +36,8 @@ export default function InventoryManager({
   stock,
   onAddProduct,
   onAddVariety,
-  onDeleteVariety
+  onDeleteVariety,
+  isEditor = false
 }: InventoryManagerProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -162,8 +164,14 @@ export default function InventoryManager({
         <div className="flex flex-wrap gap-2.5">
           <button
             onClick={() => setShowAddProductModal(true)}
-            className="bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+            disabled={!isEditor}
+            className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs ${
+              isEditor 
+                ? 'bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white cursor-pointer' 
+                : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+            }`}
             id="add-product-btn"
+            title={isEditor ? "Add a new product category" : "Log in as an authorized editor to add products"}
           >
             <FolderPlus className="h-4 w-4" /> Add Product Category
           </button>
@@ -176,13 +184,29 @@ export default function InventoryManager({
               setSelectedParentProductId(products[0].id);
               setShowAddVarietyModal(true);
             }}
-            className="bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+            disabled={!isEditor}
+            className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs ${
+              isEditor
+                ? 'bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white cursor-pointer'
+                : 'bg-indigo-50 text-indigo-300 cursor-not-allowed border border-indigo-100/50'
+            }`}
             id="add-variety-btn"
+            title={isEditor ? "Add a new variety style or SKU" : "Log in as an authorized editor to add varieties"}
           >
             <Plus className="h-4 w-4" /> Add Variety / SKU
           </button>
         </div>
       </div>
+
+      {/* Read-Only Status Notice Banner */}
+      {!isEditor && (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 flex items-center gap-3.5 text-xs text-amber-800 shadow-2xs" id="read-only-banner">
+          <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
+          <div className="leading-relaxed">
+            <span className="font-bold">Read-Only Mode:</span> You are currently viewing the live ledger. Registering new products, adding variety styles, or deleting SKUs is locked. Log in using an authorized Google Sign-In account (shreeanguarunachalam@gmail.com or surechuchi@gmail.com) in the left sidebar to perform edits.
+          </div>
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="flex flex-col md:flex-row md:items-center gap-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-xs" id="inventory-filters">
@@ -349,12 +373,18 @@ export default function InventoryManager({
                                       <td className="py-3 px-3 text-right">
                                         <button
                                           onClick={() => {
+                                            if (!isEditor) return;
                                             if (confirm(`Are you sure you want to delete variety SKU ${variety.sku}? This will clear its stock levels.`)) {
                                               onDeleteVariety(variety.id);
                                             }
                                           }}
-                                          className="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-rose-50 transition-all cursor-pointer"
-                                          title="Delete Variety"
+                                          disabled={!isEditor}
+                                          className={`p-1 rounded-md transition-all ${
+                                            isEditor 
+                                              ? 'text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer' 
+                                              : 'text-slate-300 opacity-45 cursor-not-allowed'
+                                          }`}
+                                          title={isEditor ? "Delete Variety" : "Deleting is restricted to authorized editors"}
                                         >
                                           <Trash2 className="h-4 w-4" />
                                         </button>

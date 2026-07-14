@@ -12,33 +12,43 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    // Helper to check if signed-in user is an authorized editor
+    function isEditor() {
+      return request.auth != null 
+        && request.auth.token.email_verified == true 
+        && (request.auth.token.email == 'shreeanguarunachalam@gmail.com' || request.auth.token.email == 'surechuchi@gmail.com');
+    }
+
     // Locations Collection: warehouses and storefronts
     match /locations/{locationId} {
       allow read: if true;
-      allow create, update: if isValidId(locationId) 
+      allow create, update: if isEditor()
+        && isValidId(locationId) 
         && request.resource.data.id == locationId
         && request.resource.data.name is string
         && request.resource.data.name.size() <= 100
         && (request.resource.data.type == 'warehouse' || request.resource.data.type == 'store');
-      allow delete: if true;
+      allow delete: if isEditor();
     }
 
     // Products Collection
     match /products/{productId} {
       allow read: if true;
-      allow create, update: if isValidId(productId)
+      allow create, update: if isEditor()
+        && isValidId(productId)
         && request.resource.data.id == productId
         && request.resource.data.name is string
         && request.resource.data.name.size() <= 100
         && request.resource.data.category is string
         && request.resource.data.category.size() <= 50;
-      allow delete: if true;
+      allow delete: if isEditor();
     }
 
     // Varieties Collection
     match /varieties/{varietyId} {
       allow read: if true;
-      allow create, update: if isValidId(varietyId)
+      allow create, update: if isEditor()
+        && isValidId(varietyId)
         && request.resource.data.id == varietyId
         && request.resource.data.productId is string
         && request.resource.data.varietyName is string
@@ -47,41 +57,44 @@ service cloud.firestore {
         && request.resource.data.sku.size() <= 50
         && request.resource.data.costPrice is number
         && request.resource.data.sellingPrice is number;
-      allow delete: if true;
+      allow delete: if isEditor();
     }
 
     // Stock levels mapped by varietyId_locationId
     match /stock/{stockId} {
       allow read: if true;
-      allow create, update: if stockId.matches('^[a-zA-Z0-9_\\-]+_[a-zA-Z0-9_\\-]+$')
+      allow create, update: if isEditor()
+        && stockId.matches('^[a-zA-Z0-9_\\-]+_[a-zA-Z0-9_\\-]+$')
         && request.resource.data.varietyId is string
         && request.resource.data.locationId is string
         && request.resource.data.quantity is int
         && request.resource.data.quantity >= 0;
-      allow delete: if true;
+      allow delete: if isEditor();
     }
 
     // Ledger transactions (receives, transfers, adjustments, sales)
     match /transactions/{transactionId} {
       allow read: if true;
-      allow create, update: if isValidId(transactionId)
+      allow create, update: if isEditor()
+        && isValidId(transactionId)
         && request.resource.data.id == transactionId
         && request.resource.data.type is string
         && request.resource.data.sku is string
         && request.resource.data.quantity is int
         && request.resource.data.reportedBy is string
         && request.resource.data.reportedBy.size() <= 100;
-      allow delete: if true;
+      allow delete: if isEditor();
     }
 
     // Category Hierarchy Trees
     match /categoryTree/{nodeId} {
       allow read: if true;
-      allow create, update: if isValidId(nodeId)
+      allow create, update: if isEditor()
+        && isValidId(nodeId)
         && request.resource.data.id == nodeId
         && request.resource.data.name is string
         && request.resource.data.name.size() <= 100;
-      allow delete: if true;
+      allow delete: if isEditor();
     }
   }
 }

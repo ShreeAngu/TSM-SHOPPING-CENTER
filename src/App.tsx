@@ -14,7 +14,8 @@ import {
   Menu,
   X,
   GitBranch,
-  Settings
+  Settings,
+  AlertCircle
 } from 'lucide-react';
 import { 
   Location, 
@@ -51,7 +52,8 @@ import {
   resetCloudDatabase
 } from './lib/dbService';
 import { writeBatch, doc } from 'firebase/firestore';
-import { db } from './lib/firebase';
+import { db, auth } from './lib/firebase';
+import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
 
 export default function App() {
   // Navigation Tabs
@@ -67,6 +69,55 @@ export default function App() {
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // Authentication State
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isEditor, setIsEditor] = useState<boolean>(false);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      if (user && user.email && ['shreeanguarunachalam@gmail.com', 'surechuchi@gmail.com'].includes(user.email.toLowerCase())) {
+        setIsEditor(true);
+      } else {
+        setIsEditor(false);
+      }
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleGoogleSignIn = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+      if (user && user.email) {
+        const isAllowed = ['shreeanguarunachalam@gmail.com', 'surechuchi@gmail.com'].includes(user.email.toLowerCase());
+        if (isAllowed) {
+          setIsEditor(true);
+        } else {
+          setIsEditor(false);
+          alert(`Success! Signed in as ${user.email}. Note: This account is in Read-Only Mode because it is not on the authorized editors list.`);
+        }
+      }
+    } catch (err: any) {
+      console.error('Google Sign-In Error:', err);
+      alert(`Sign-In failed: ${err.message}`);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      setIsEditor(false);
+      setCurrentUser(null);
+    } catch (err: any) {
+      console.error('Sign-Out Error:', err);
+    }
+  };
 
   // Core Real-Time State (Cloud Synced)
   const [locations, setLocations] = useState<Location[]>([]);
@@ -107,38 +158,44 @@ export default function App() {
     };
 
     // Run dynamic seed first, then establish active cloud subscriptions
+    const handleSubError = (err: Error) => {
+      console.error('Active subscription sync error:', err);
+      setSyncError(err.message);
+      setIsLoading(false);
+    };
+
     seedDatabaseIfNeeded()
       .then(() => {
         unsubLocs = listenLocations((data) => {
           setLocations(data);
           loadedQueries.locs = true;
           checkIfFullyLoaded();
-        });
+        }, handleSubError);
         unsubProds = listenProducts((data) => {
           setProducts(data);
           loadedQueries.prods = true;
           checkIfFullyLoaded();
-        });
+        }, handleSubError);
         unsubVars = listenVarieties((data) => {
           setVarieties(data);
           loadedQueries.vars = true;
           checkIfFullyLoaded();
-        });
+        }, handleSubError);
         unsubStock = listenStock((data) => {
           setStock(data);
           loadedQueries.stock = true;
           checkIfFullyLoaded();
-        });
+        }, handleSubError);
         unsubTxs = listenTransactions((data) => {
           setTransactions(data);
           loadedQueries.txs = true;
           checkIfFullyLoaded();
-        });
+        }, handleSubError);
         unsubTree = listenCategoryTree((data) => {
           setCategoryTree(data);
           loadedQueries.tree = true;
           checkIfFullyLoaded();
-        });
+        }, handleSubError);
       })
       .catch((err) => {
         console.error('Error seeding/listening to Firebase:', err);
@@ -456,6 +513,80 @@ export default function App() {
             </div>
           </div>
 
+          {/* User Authentication Profile Card */}
+          <div className="bg-slate-800/50 border border-slate-800 rounded-2xl p-4 space-y-3.5" id="sidebar-auth-panel">
+            <div className="flex items-center gap-1.5 font-bold text-slate-400 text-[10px] uppercase tracking-wider">
+              <span>Security & Access</span>
+            </div>
+            {currentUser && !currentUser.isAnonymous ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2.5">
+                  {currentUser.photoURL ? (
+                    <img 
+                      src={currentUser.photoURL} 
+                      alt={currentUser.displayName || 'User'} 
+                      className="h-9 w-9 rounded-full border border-slate-700 shadow-sm"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="h-9 w-9 rounded-full bg-indigo-600 text-white font-bold text-sm flex items-center justify-center border border-indigo-500 shadow-sm">
+                      {(currentUser.displayName || currentUser.email || 'U')[0].toUpperCase()}
+                    </div>
+                  )}
+                  <div className="overflow-hidden min-w-0">
+                    <p className="text-xs font-bold text-white truncate leading-tight">{currentUser.displayName || 'TSM User'}</p>
+                    <p className="text-[10px] text-slate-400 truncate leading-tight mt-0.5">{currentUser.email}</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  {isEditor ? (
+                    <span className="inline-flex items-center justify-center gap-1 px-2.5 py-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-400/20 rounded-lg">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Authorized Editor
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center justify-center gap-1 px-2.5 py-1 text-[10px] font-bold text-amber-400 bg-amber-500/10 border border-amber-400/20 rounded-lg">
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                      Read-Only Viewer
+                    </span>
+                  )}
+                  
+                  <button
+                    onClick={handleSignOut}
+                    className="w-full text-center py-1.5 border border-slate-800 hover:border-slate-700 hover:bg-slate-800 text-slate-400 hover:text-rose-400 rounded-lg text-[10px] font-bold transition-all cursor-pointer"
+                  >
+                    Disconnect Profile
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="bg-amber-500/5 border border-amber-500/15 rounded-xl p-2.5 text-[11px] text-amber-300 leading-relaxed space-y-1">
+                  <p className="font-bold flex items-center gap-1">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-ping" />
+                    Read-Only Mode
+                  </p>
+                  <p className="text-slate-400 text-[10px]">
+                    Anyone can view data. Log in to perform additions, edits, or deletions.
+                  </p>
+                </div>
+                <button
+                  onClick={handleGoogleSignIn}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2 px-3.5 rounded-xl transition-all shadow-md shadow-indigo-600/10 hover:shadow-indigo-600/20 cursor-pointer flex items-center justify-center gap-2 border border-indigo-500"
+                >
+                  <svg className="h-3.5 w-3.5 text-white" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.85z" fill="currentColor" />
+                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.85c.87-2.6 3.3-4.53 6.16-4.53z" fill="currentColor" />
+                  </svg>
+                  Sign In with Google
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="bg-slate-800/40 rounded-2xl p-4 border border-slate-800 text-[11px] text-slate-400 space-y-2 mt-auto">
             <div className="flex items-center gap-1.5 font-semibold text-indigo-300">
               <Warehouse className="h-3.5 w-3.5 text-orange-400 animate-pulse" />
@@ -537,23 +668,86 @@ export default function App() {
         {/* Primary Page Canvas (Right Hand Side) */}
         <main className="flex-1 p-5 md:p-8 overflow-y-auto max-w-(screen-xl) mx-auto w-full" id="primary-content-canvas">
           {syncError ? (
-            <div className="bg-rose-50 border border-rose-100 rounded-2xl p-8 max-w-lg mx-auto my-12 text-center space-y-4 shadow-sm" id="sync-error-boundary">
-              <div className="h-12 w-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
-                <RefreshCw className="h-6 w-6 animate-spin" />
-              </div>
-              <h3 className="text-lg font-bold text-slate-800">Connection Sync Issue</h3>
-              <p className="text-sm text-slate-500 leading-relaxed">
-                Could not sync with the centralized Firestore cloud database. Please verify your firestore.rules permission configuration.
-              </p>
-              <div className="text-xs bg-slate-900 text-rose-400 font-mono p-3 rounded-lg text-left overflow-x-auto select-all max-h-40">
-                {syncError}
-              </div>
-              <button 
-                onClick={() => window.location.reload()}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-sm"
-              >
-                <RefreshCw className="h-3.5 w-3.5" /> Reconnect Now
-              </button>
+            <div className="max-w-2xl mx-auto my-12 space-y-6" id="sync-error-boundary">
+              {syncError.toLowerCase().includes('permission') || syncError.toLowerCase().includes('insufficient') ? (
+                <div className="bg-white border border-rose-100 rounded-3xl p-8 shadow-sm space-y-6">
+                  <div className="flex items-start space-x-4">
+                    <div className="h-12 w-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                      <RefreshCw className="h-6 w-6 animate-spin" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900">Firestore Access Adjustment Required</h3>
+                      <p className="text-sm text-slate-500 mt-1 leading-relaxed">
+                        You have successfully updated your configuration to connect to your custom external Firebase project (<span className="font-semibold text-indigo-600 font-mono">tsm-shopping-center</span>). 
+                        However, because this is an external project, we do not have permission to automatically deploy the Firestore security rules.
+                      </p>
+                    </div>
+                  </div>
+
+                  <hr className="border-slate-100" />
+
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Quick Resolution Steps:</h4>
+                    <ol className="text-sm text-slate-600 space-y-3 list-decimal pl-5">
+                      <li>
+                        Open your <a href="https://console.firebase.google.com/project/tsm-shopping-center/firestore/rules" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-semibold inline-flex items-center gap-0.5">Firebase Console Rules page <span className="text-[10px]">↗</span></a> for <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-800">tsm-shopping-center</span>.
+                      </li>
+                      <li>
+                        Paste the following security rules into the online editor (enables read and write access for all collections):
+                        <div className="mt-2 text-xs bg-slate-950 text-indigo-200 font-mono p-4 rounded-xl text-left overflow-x-auto select-all shadow-inner leading-relaxed max-h-56">
+{`rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}`}
+                        </div>
+                      </li>
+                      <li>
+                        Click the <strong className="text-slate-800 font-bold">Publish</strong> button in the Firebase Console.
+                      </li>
+                      <li>
+                        Wait 5-10 seconds for Google's servers to distribute the rules, then click the button below:
+                      </li>
+                    </ol>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl text-xs space-y-1 text-slate-500">
+                    <p className="font-semibold text-slate-700">Detailed error payload for reference:</p>
+                    <p className="font-mono select-all overflow-x-auto text-[11px] bg-white p-2 rounded border border-slate-200 mt-1">{syncError}</p>
+                  </div>
+
+                  <div className="flex items-center justify-end">
+                    <button 
+                      onClick={() => window.location.reload()}
+                      className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-5 py-3 rounded-xl transition-all cursor-pointer inline-flex items-center gap-2 shadow-md shadow-indigo-600/10"
+                    >
+                      <RefreshCw className="h-4 w-4" /> Reconnect & Seed Now
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-rose-50 border border-rose-100 rounded-3xl p-8 text-center space-y-4 shadow-xs">
+                  <div className="h-12 w-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+                    <RefreshCw className="h-6 w-6 animate-spin" />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-800">Connection Sync Issue</h3>
+                  <p className="text-sm text-slate-500 leading-relaxed">
+                    Could not sync with your centralized Firestore cloud database. Please verify your firestore.rules permission configuration.
+                  </p>
+                  <div className="text-xs bg-slate-900 text-rose-400 font-mono p-4 rounded-xl text-left overflow-x-auto select-all max-h-40">
+                    {syncError}
+                  </div>
+                  <button 
+                    onClick={() => window.location.reload()}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-sm"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" /> Reconnect Now
+                  </button>
+                </div>
+              )}
             </div>
           ) : isLoading ? (
             <div className="flex flex-col items-center justify-center py-20 space-y-4" id="firebase-loading-fallback">
@@ -585,6 +779,7 @@ export default function App() {
                   onAddProduct={handleAddProduct}
                   onAddVariety={handleAddVariety}
                   onDeleteVariety={handleDeleteVariety}
+                  isEditor={isEditor}
                 />
               )}
 
@@ -594,6 +789,7 @@ export default function App() {
                   varieties={varieties}
                   stock={stock}
                   onAddTransaction={handleAddTransaction}
+                  isEditor={isEditor}
                 />
               )}
 
@@ -614,11 +810,12 @@ export default function App() {
                   treeNodes={categoryTree}
                   onAddNode={handleAddCategoryNode}
                   onDeleteNode={handleDeleteCategoryNode}
+                  isEditor={isEditor}
                 />
               )}
 
               {activeTab === 'settings' && (
-                <SettingsTab locations={locations} />
+                <SettingsTab locations={locations} isEditor={isEditor} />
               )}
             </>
           )}

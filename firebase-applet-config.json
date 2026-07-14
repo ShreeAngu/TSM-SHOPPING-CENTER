@@ -1,12 +1,12 @@
 {
-  "projectId": "gen-lang-client-0045307059",
-  "appId": "1:255614680883:web:66651d240d59a5c0a50846",
-  "apiKey": "AIzaSyBIS6NbNaMdA4Y1QeuRONSliqrSJDqNCCk",
-  "authDomain": "gen-lang-client-0045307059.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-tsmcentralizedin-d35d808d-e13b-4375-9663-4fbbac15a0cd",
-  "storageBucket": "gen-lang-client-0045307059.firebasestorage.app",
-  "messagingSenderId": "255614680883",
-  "measurementId": "",
+  "projectId": "tsm-shopping-center",
+  "appId": "1:144210611682:web:5e204bb4dc1f67f5f6fdbb",
+  "apiKey": "AIzaSyDVeY7gxEWFtXNg5ye_Ydqt3VjI_hRaLkE",
+  "authDomain": "tsm-shopping-center.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "tsm-shopping-center.firebasestorage.app",
+  "messagingSenderId": "144210611682",
+  "measurementId": "G-TLXKHTLNG5",
   "oAuthClientId": "255614680883-qljs7sigof22udc9q7iffhdds71shkra.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

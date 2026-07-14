@@ -9,7 +9,8 @@ import {
   query, 
   orderBy 
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { db, auth } from './firebase';
+import { signInAnonymously } from 'firebase/auth';
 import { Location, Product, ProductVariety, StockLevel, Transaction, CategoryTreeNode } from '../types';
 
 // Error Handling Infrastructure following Firebase Skill guidelines
@@ -40,15 +41,19 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const currentUser = auth.currentUser;
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: null,
-      email: null,
-      emailVerified: null,
-      isAnonymous: null,
-      tenantId: null,
-      providerInfo: []
+      userId: currentUser?.uid || null,
+      email: currentUser?.email || null,
+      emailVerified: currentUser?.emailVerified || null,
+      isAnonymous: currentUser?.isAnonymous || null,
+      tenantId: currentUser?.tenantId || null,
+      providerInfo: currentUser?.providerData.map(p => ({
+        providerId: p.providerId,
+        email: p.email
+      })) || []
     },
     operationType,
     path
@@ -56,6 +61,23 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
+
+/**
+ * Attempts to sign in anonymously if no current user exists.
+ * This satisfies standard/default security rules that require authentication (allow read, write: if request.auth != null).
+ */
+export async function ensureAuthenticated() {
+  try {
+    if (!auth.currentUser) {
+      console.log('No current user detected. Attempting anonymous authentication...');
+      await signInAnonymously(auth);
+      console.log('Anonymous authentication successful! User UID:', auth.currentUser?.uid);
+    }
+  } catch (err) {
+    console.warn('Anonymous authentication failed (it might be disabled in Firebase Console):', err);
+  }
+}
+
 
 export const INITIAL_LOCATIONS: Location[] = [
   { id: 'wh-1', name: 'Warehouse A (Main Depot)', type: 'warehouse', address: '12 Logistics Blvd, Industrial Zone' },
@@ -72,6 +94,9 @@ export const INITIAL_LOCATIONS: Location[] = [
  */
 export async function seedDatabaseIfNeeded() {
   try {
+    // Try to ensure the client is authenticated (e.g. anonymous auth) before doing reads/writes
+    await ensureAuthenticated();
+
     // Check if the database contains mock data (identified by the existence of mock product 'p-1')
     const productsSnap = await getDocs(collection(db, 'products'));
     const hasMockData = productsSnap.docs.some(doc => doc.id === 'p-1');
@@ -113,14 +138,15 @@ export async function seedDatabaseIfNeeded() {
       console.log('Physical supply chain locations seeded successfully!');
     }
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, 'locations_seed');
+    console.warn('Database seeding skipped or failed. This is expected if the security rules on your custom project do not allow unauthenticated or unauthorized writes. Details:', error);
+    // Do not throw! Let the application continue so listeners can be mounted.
   }
 }
 
 /**
  * Real-time listeners with strict error callbacks
  */
-export function listenLocations(callback: (locations: Location[]) => void) {
+export function listenLocations(callback: (locations: Location[]) => void, onError?: (error: Error) => void) {
   return onSnapshot(
     collection(db, 'locations'), 
     (snapshot) => {
@@ -131,12 +157,17 @@ export function listenLocations(callback: (locations: Location[]) => void) {
       callback(list);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.GET, 'locations');
+      try {
+        handleFirestoreError(error, OperationType.GET, 'locations');
+      } catch (err: any) {
+        if (onError) onError(err);
+        else throw err;
+      }
     }
   );
 }
 
-export function listenProducts(callback: (products: Product[]) => void) {
+export function listenProducts(callback: (products: Product[]) => void, onError?: (error: Error) => void) {
   return onSnapshot(
     collection(db, 'products'), 
     (snapshot) => {
@@ -147,12 +178,17 @@ export function listenProducts(callback: (products: Product[]) => void) {
       callback(list);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.GET, 'products');
+      try {
+        handleFirestoreError(error, OperationType.GET, 'products');
+      } catch (err: any) {
+        if (onError) onError(err);
+        else throw err;
+      }
     }
   );
 }
 
-export function listenVarieties(callback: (varieties: ProductVariety[]) => void) {
+export function listenVarieties(callback: (varieties: ProductVariety[]) => void, onError?: (error: Error) => void) {
   return onSnapshot(
     collection(db, 'varieties'), 
     (snapshot) => {
@@ -163,12 +199,17 @@ export function listenVarieties(callback: (varieties: ProductVariety[]) => void)
       callback(list);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.GET, 'varieties');
+      try {
+        handleFirestoreError(error, OperationType.GET, 'varieties');
+      } catch (err: any) {
+        if (onError) onError(err);
+        else throw err;
+      }
     }
   );
 }
 
-export function listenStock(callback: (stock: StockLevel[]) => void) {
+export function listenStock(callback: (stock: StockLevel[]) => void, onError?: (error: Error) => void) {
   return onSnapshot(
     collection(db, 'stock'), 
     (snapshot) => {
@@ -179,12 +220,17 @@ export function listenStock(callback: (stock: StockLevel[]) => void) {
       callback(list);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.GET, 'stock');
+      try {
+        handleFirestoreError(error, OperationType.GET, 'stock');
+      } catch (err: any) {
+        if (onError) onError(err);
+        else throw err;
+      }
     }
   );
 }
 
-export function listenTransactions(callback: (transactions: Transaction[]) => void) {
+export function listenTransactions(callback: (transactions: Transaction[]) => void, onError?: (error: Error) => void) {
   const q = query(collection(db, 'transactions'), orderBy('timestamp', 'desc'));
   return onSnapshot(
     q, 
@@ -196,12 +242,17 @@ export function listenTransactions(callback: (transactions: Transaction[]) => vo
       callback(list);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.GET, 'transactions');
+      try {
+        handleFirestoreError(error, OperationType.GET, 'transactions');
+      } catch (err: any) {
+        if (onError) onError(err);
+        else throw err;
+      }
     }
   );
 }
 
-export function listenCategoryTree(callback: (treeNodes: CategoryTreeNode[]) => void) {
+export function listenCategoryTree(callback: (treeNodes: CategoryTreeNode[]) => void, onError?: (error: Error) => void) {
   return onSnapshot(
     collection(db, 'categoryTree'), 
     (snapshot) => {
@@ -212,7 +263,12 @@ export function listenCategoryTree(callback: (treeNodes: CategoryTreeNode[]) => 
       callback(list);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.GET, 'categoryTree');
+      try {
+        handleFirestoreError(error, OperationType.GET, 'categoryTree');
+      } catch (err: any) {
+        if (onError) onError(err);
+        else throw err;
+      }
     }
   );
 }

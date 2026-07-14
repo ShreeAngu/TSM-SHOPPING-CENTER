@@ -21,13 +21,15 @@ interface ReportFormProps {
   varieties: ProductVariety[];
   stock: StockLevel[];
   onAddTransaction: (transaction: Omit<Transaction, 'id' | 'timestamp'> & { timestamp?: string }) => void;
+  isEditor?: boolean;
 }
 
 export default function ReportForm({
   locations,
   varieties,
   stock,
-  onAddTransaction
+  onAddTransaction,
+  isEditor = false
 }: ReportFormProps) {
   // Form type
   const [txType, setTxType] = useState<TransactionType>('transfer');
@@ -192,6 +194,16 @@ export default function ReportForm({
           Since you do not run automated billing machines, use this ledger desk to log hand-written worker notes, warehouse transfers, direct-to-customer sales, or inbound supplier shipments.
         </p>
       </div>
+
+      {/* Read-Only Mode Warning Banner */}
+      {!isEditor && (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 flex items-center gap-3.5 text-xs text-amber-800 shadow-2xs" id="read-only-report-banner">
+          <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
+          <div className="leading-relaxed">
+            <span className="font-bold">Read-Only Mode:</span> Worker report logs submission is locked. Log in using an authorized Google Sign-In account (shreeanguarunachalam@gmail.com or surechuchi@gmail.com) in the left sidebar to log transactions.
+          </div>
+        </div>
+      )}
 
       {/* Success Alert */}
       {successMessage && (
@@ -456,9 +468,14 @@ export default function ReportForm({
             <div className="pt-2">
               <button
                 type="submit"
-                className="w-full bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-semibold py-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
+                disabled={!isEditor}
+                className={`w-full font-semibold py-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-all shadow-xs ${
+                  isEditor 
+                    ? 'bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white cursor-pointer' 
+                    : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                }`}
               >
-                <CheckCircle2 className="h-4 w-4" /> Log Worker Report to Ledger
+                <CheckCircle2 className="h-4 w-4" /> {isEditor ? "Log Worker Report to Ledger" : "Submission Restricted (Read-Only Mode)"}
               </button>
             </div>
           </form>
