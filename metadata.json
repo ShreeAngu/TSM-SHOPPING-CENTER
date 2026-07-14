@@ -1,0 +1,6 @@
+{
+  "name": "TSM Centralized Inventory Tracker",
+  "description": "A centralized inventory management dashboard for tracking stock, SKU transactions, and locations across multiple stores and warehouses.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
