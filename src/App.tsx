@@ -15,7 +15,9 @@ import {
   X,
   GitBranch,
   Settings,
-  AlertCircle
+  AlertCircle,
+  ArrowRightLeft,
+  Trash2
 } from 'lucide-react';
 import { 
   Location, 
@@ -148,6 +150,27 @@ export default function App() {
 
   // Selected Variety for the Search/Detail View
   const [selectedVarietyId, setSelectedVarietyId] = useState<string>('');
+
+  // Custom dialog modals and flows
+  const [showWipeModal, setShowWipeModal] = useState<boolean>(false);
+  const [wipeIsLoading, setWipeIsLoading] = useState<boolean>(false);
+
+  const [showCategoryDeleteModal, setShowCategoryDeleteModal] = useState<boolean>(false);
+  const [categoryToDelete, setCategoryToDelete] = useState<CategoryTreeNode | null>(null);
+  const [categoryStocksInvolved, setCategoryStocksInvolved] = useState<{
+    varietyId: string;
+    varietyName: string;
+    sku: string;
+    locationId: string;
+    locationName: string;
+    quantity: number;
+  }[]>([]);
+  const [categoryDeleteIsLoading, setCategoryDeleteIsLoading] = useState<boolean>(false);
+
+  const [pendingTransferAlert, setPendingTransferAlert] = useState<{
+    categoryName: string;
+    items: { sku: string; varietyName: string; locationName: string; quantity: number }[];
+  } | null>(null);
 
   // 1. Initialize State and Sync Real-Time from Cloud Firestore
   useEffect(() => {
@@ -400,23 +423,111 @@ export default function App() {
     await addCategoryNode(newNode);
   };
 
-  const handleDeleteCategoryNode = async (nodeId: string) => {
-    // Recursively delete children
-    const deleteNodeAndChildren = async (id: string) => {
-      await deleteCategoryNode(id);
-      const children = categoryTree.filter(n => n.parentId === id);
-      for (const child of children) {
-        await deleteNodeAndChildren(child.id);
+  const executeCategoryDeletion = async (nodeId: string, actionOnStock: 'discard' | 'ignore' = 'discard') => {
+    setCategoryDeleteIsLoading(true);
+    try {
+      // 1. Get all descendant category node IDs recursively
+      const getAllDescendantIds = (id: string): string[] => {
+        const children = categoryTree.filter(n => n.parentId === id);
+        return [id, ...children.flatMap(child => getAllDescendantIds(child.id))];
+      };
+      const nodeIdsToDelete = getAllDescendantIds(nodeId);
+
+      const batch = writeBatch(db);
+
+      // Delete category nodes
+      nodeIdsToDelete.forEach(id => {
+        batch.delete(doc(db, 'categoryTree', id));
+      });
+
+      if (actionOnStock === 'discard') {
+        // Delete all products in these categories
+        const productsInDeletedCats = products.filter(p => nodeIdsToDelete.includes(p.category));
+        const productIdsInDeletedCats = productsInDeletedCats.map(p => p.id);
+
+        productsInDeletedCats.forEach(p => {
+          batch.delete(doc(db, 'products', p.id));
+        });
+
+        // Delete all varieties in these categories or products
+        const varietiesInDeletedCats = varieties.filter(v => 
+          nodeIdsToDelete.includes(v.category) || productIdsInDeletedCats.includes(v.productId)
+        );
+
+        varietiesInDeletedCats.forEach(v => {
+          batch.delete(doc(db, 'varieties', v.id));
+          // Delete all stock docs for these varieties
+          locations.forEach(loc => {
+            batch.delete(doc(db, 'stock', `${v.id}_${loc.id}`));
+          });
+        });
       }
+
+      await batch.commit();
+    } catch (error) {
+      console.error('Error during category deletion:', error);
+      alert('Error deleting category hierarchy. Please try again.');
+    } finally {
+      setCategoryDeleteIsLoading(false);
+      setShowCategoryDeleteModal(false);
+      setCategoryToDelete(null);
+      setCategoryStocksInvolved([]);
+    }
+  };
+
+  const handleDeleteCategoryNode = async (nodeId: string) => {
+    // 1. Find the node being deleted
+    const node = categoryTree.find(n => n.id === nodeId);
+    if (!node) return;
+
+    // 2. Recursively find all child category IDs to be deleted
+    const getAllDescendantIds = (id: string): string[] => {
+      const children = categoryTree.filter(n => n.parentId === id);
+      return [id, ...children.flatMap(child => getAllDescendantIds(child.id))];
     };
-    await deleteNodeAndChildren(nodeId);
+    const nodeIdsToDelete = getAllDescendantIds(nodeId);
+
+    // 3. Find any varieties linked to these categories
+    const productsInDeletedCats = products.filter(p => nodeIdsToDelete.includes(p.category));
+    const productIdsInDeletedCats = productsInDeletedCats.map(p => p.id);
+
+    const varietiesInDeletedCats = varieties.filter(v => 
+      nodeIdsToDelete.includes(v.category) || productIdsInDeletedCats.includes(v.productId)
+    );
+    const varietyIdsInDeletedCats = varietiesInDeletedCats.map(v => v.id);
+
+    // 4. Find all stock levels for these varieties that have non-zero quantity
+    const activeStocks = stock.filter(s => 
+      varietyIdsInDeletedCats.includes(s.varietyId) && s.quantity > 0
+    ).map(s => {
+      const variety = varieties.find(v => v.id === s.varietyId);
+      const loc = locations.find(l => l.id === s.locationId);
+      return {
+        varietyId: s.varietyId,
+        varietyName: variety ? variety.varietyName : 'Unknown',
+        sku: variety ? variety.sku : 'Unknown',
+        locationId: s.locationId,
+        locationName: loc ? loc.name : 'Unknown Location',
+        quantity: s.quantity
+      };
+    });
+
+    // If there is active stock, we MUST ask the user what to do with it!
+    if (activeStocks.length > 0) {
+      setCategoryToDelete(node);
+      setCategoryStocksInvolved(activeStocks);
+      setShowCategoryDeleteModal(true);
+    } else {
+      // No active stocks. Simple confirmation
+      if (window.confirm(`Are you sure you want to delete "${node.name}" and all its subcategories?`)) {
+        await executeCategoryDeletion(nodeId, 'discard');
+      }
+    }
   };
 
   // 7. Maintenance: Clear Database and reset to clean slate
   const handleResetToDefaults = async () => {
-    if (window.confirm('Wipe & Clear Cloud Database? This will permanently erase all products, varieties, stock states, transaction logs, and category trees, resetting the system to a completely clean workspace.')) {
-      await resetCloudDatabase();
-    }
+    setShowWipeModal(true);
   };
 
   // 8. Data Transfer: Export Backup File (JSON)
@@ -1020,14 +1131,59 @@ service cloud.firestore {
               )}
 
               {activeTab === 'report' && (
-                <ReportForm 
-                  locations={locations}
-                  varieties={varieties}
-                  stock={stock}
-                  transactions={transactions}
-                  onAddTransaction={handleAddTransaction}
-                  isEditor={isEditor}
-                />
+                <>
+                  {pendingTransferAlert && (
+                    <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 mb-6 space-y-3" id="pending-transfer-banner">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <ArrowRightLeft className="h-5 w-5 text-indigo-600 animate-pulse" />
+                          <h4 className="font-bold text-indigo-900 text-sm">
+                            Pending Stock Transfers for Category "{pendingTransferAlert.categoryName}"
+                          </h4>
+                        </div>
+                        <button 
+                          onClick={() => setPendingTransferAlert(null)}
+                          className="text-slate-400 hover:text-slate-600 text-xs font-semibold px-2 py-1 rounded-md hover:bg-slate-200/50 cursor-pointer"
+                        >
+                          Dismiss List
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        Before deleting this category, you should transfer these remaining items to another category, location, or file negative adjustments to zero them out. Use the reporting form below to log these worker activity reports.
+                      </p>
+                      <div className="overflow-hidden border border-slate-200 rounded-xl bg-white max-h-48 overflow-y-auto">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="border-b border-slate-100 bg-slate-50 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                              <th className="py-2 px-3">SKU</th>
+                              <th className="py-2 px-3">Variety / Description</th>
+                              <th className="py-2 px-3">Current Location</th>
+                              <th className="py-2 px-3 text-right">In Stock Qty</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                            {pendingTransferAlert.items.map((item, idx) => (
+                              <tr key={idx} className="hover:bg-indigo-50/20">
+                                <td className="py-2 px-3 font-mono font-bold text-indigo-700">{item.sku}</td>
+                                <td className="py-2 px-3">{item.varietyName}</td>
+                                <td className="py-2 px-3 text-slate-600">{item.locationName}</td>
+                                <td className="py-2 px-3 text-right font-mono font-bold text-slate-800">{item.quantity} pcs</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                  <ReportForm 
+                    locations={locations}
+                    varieties={varieties}
+                    stock={stock}
+                    transactions={transactions}
+                    onAddTransaction={handleAddTransaction}
+                    isEditor={isEditor}
+                  />
+                </>
               )}
 
               {activeTab === 'search' && (
@@ -1153,6 +1309,207 @@ service cloud.firestore {
                   </button>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Wipe & Clear Cloud Database */}
+      {showWipeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-xl max-w-md w-full p-6 space-y-6 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-rose-50 text-rose-600 rounded-xl">
+                <Trash2 className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Wipe & Clear Cloud Database</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Choose your database reset preferences</p>
+              </div>
+            </div>
+
+            <div className="space-y-3.5 text-xs">
+              <p className="text-slate-500 leading-relaxed">
+                Please select whether you want to perform a partial wipe of stock levels or completely wipe the entire workspace back to clean defaults.
+              </p>
+
+              <div className="space-y-2.5">
+                {/* Option 1: Only Stocks */}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (window.confirm('Are you absolutely sure you want to delete ONLY stock levels and transaction logs? Categories, varieties, products, and locations will remain.')) {
+                      setWipeIsLoading(true);
+                      try {
+                        await resetCloudDatabase(true);
+                        alert('Stock levels and transaction history cleared successfully!');
+                      } catch (e) {
+                        alert('Failed to reset stocks.');
+                      } finally {
+                        setWipeIsLoading(false);
+                        setShowWipeModal(false);
+                      }
+                    }
+                  }}
+                  disabled={wipeIsLoading}
+                  className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50/20 transition-all group flex items-start gap-3 cursor-pointer"
+                >
+                  <div className="p-1.5 bg-amber-50 text-amber-600 rounded-lg group-hover:bg-amber-100 mt-0.5">
+                    <Boxes className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-800">Delete Stocks & Logs Only</h4>
+                    <p className="text-[11px] text-slate-500 mt-1 leading-normal">
+                      Removes all stock records & transaction histories. Keeps categories, product specifications, and varieties intact.
+                    </p>
+                  </div>
+                </button>
+
+                {/* Option 2: Full Wipe */}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (window.confirm('Are you absolutely sure you want to wipe the ENTIRE database? This will permanently delete categories, products, varieties, stocks, and transaction logs, resetting everything.')) {
+                      setWipeIsLoading(true);
+                      try {
+                        await resetCloudDatabase(false);
+                        alert('Entire cloud database cleared successfully!');
+                      } catch (e) {
+                        alert('Failed to reset database.');
+                      } finally {
+                        setWipeIsLoading(false);
+                        setShowWipeModal(false);
+                      }
+                    }
+                  }}
+                  disabled={wipeIsLoading}
+                  className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-rose-400 hover:bg-rose-50/20 transition-all group flex items-start gap-3 cursor-pointer"
+                >
+                  <div className="p-1.5 bg-rose-50 text-rose-600 rounded-lg group-hover:bg-rose-100 mt-0.5">
+                    <Trash2 className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-800">Wipe Everything (Full Slate)</h4>
+                    <p className="text-[11px] text-slate-500 mt-1 leading-normal">
+                      Erase absolutely everything: products, varieties, stocks, transaction logs, and category trees. Re-seeds clean locations.
+                    </p>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-50 pt-4">
+              <button
+                type="button"
+                onClick={() => setShowWipeModal(false)}
+                disabled={wipeIsLoading}
+                className="bg-slate-50 hover:bg-slate-100 text-slate-600 px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer border border-slate-200/80 transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Category Deletion Stock Warning */}
+      {showCategoryDeleteModal && categoryToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-xl max-w-lg w-full p-6 space-y-6 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
+                <AlertCircle className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Category Stock Warning</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Category "{categoryToDelete.name}" has active stock levels</p>
+              </div>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <p className="text-slate-500 leading-relaxed">
+                There are currently <span className="font-bold text-slate-800">{categoryStocksInvolved.reduce((sum, item) => sum + item.quantity, 0)} pcs</span> in stock belonging to products in this category hierarchy. What would you like to do with these stocks?
+              </p>
+
+              {/* List of active stocks */}
+              <div className="border border-slate-100 bg-slate-50/50 rounded-xl p-3 max-h-36 overflow-y-auto space-y-2">
+                <p className="font-bold text-[10px] text-slate-400 uppercase tracking-wider">Active Stocks:</p>
+                {categoryStocksInvolved.map((item, idx) => (
+                  <div key={idx} className="flex justify-between items-center text-[11px] font-medium text-slate-700 bg-white p-2 rounded-lg border border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-[10px]">{item.sku}</span>
+                      <span className="truncate max-w-[150px]">{item.varietyName}</span>
+                      <span className="text-slate-400 text-[10px]">({item.locationName})</span>
+                    </div>
+                    <span className="font-bold font-mono text-slate-800">{item.quantity} pcs</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-2.5">
+                {/* Option 1: Discard stock */}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (window.confirm('Are you sure you want to discard all stock in this category? This will delete the products, variety SKUs, and stock records belonging to this category hierarchy.')) {
+                      await executeCategoryDeletion(categoryToDelete.id, 'discard');
+                    }
+                  }}
+                  disabled={categoryDeleteIsLoading}
+                  className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-rose-400 hover:bg-rose-50/20 transition-all group flex items-start gap-3 cursor-pointer"
+                >
+                  <div className="p-1.5 bg-rose-50 text-rose-600 rounded-lg group-hover:bg-rose-100 mt-0.5">
+                    <Trash2 className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-800">Discard all stock and delete</h4>
+                    <p className="text-[11px] text-slate-500 mt-1 leading-normal">
+                      Deletes the category, and permanently deletes all products, varieties, and stock records in this hierarchy.
+                    </p>
+                  </div>
+                </button>
+
+                {/* Option 2: Transfer stock */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Set pending transfers alert and switch tab
+                    setPendingTransferAlert({
+                      categoryName: categoryToDelete.name,
+                      items: categoryStocksInvolved
+                    });
+                    setShowCategoryDeleteModal(false);
+                    setActiveTab('report'); // Switch to 'Log Worker Reports'
+                  }}
+                  disabled={categoryDeleteIsLoading}
+                  className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/20 transition-all group flex items-start gap-3 cursor-pointer"
+                >
+                  <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg group-hover:bg-indigo-100 mt-0.5">
+                    <ArrowRightLeft className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-800">Transfer stocks using worker reports</h4>
+                    <p className="text-[11px] text-slate-500 mt-1 leading-normal">
+                      Keep the category for now. We will direct you to the Log Worker Reports tab and display this list so you can transfer these stocks.
+                    </p>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-50 pt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCategoryDeleteModal(false);
+                  setCategoryToDelete(null);
+                  setCategoryStocksInvolved([]);
+                }}
+                disabled={categoryDeleteIsLoading}
+                className="bg-slate-50 hover:bg-slate-100 text-slate-600 px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer border border-slate-200/80 transition-all"
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>

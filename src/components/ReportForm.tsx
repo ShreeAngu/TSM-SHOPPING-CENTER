@@ -151,7 +151,7 @@ export default function ReportForm({
       if (currentAvailableStock < inputQty) {
         const locName = locations.find(l => l.id === fromLocId)?.name || 'Source';
         setWarningMessage(
-          `Alert: Only ${currentAvailableStock} units available at ${locName}. Proceeding will trigger a negative stock adjustment (-${inputQty - currentAvailableStock} units).`
+          `Error: Insufficient stock at ${locName}. Only ${currentAvailableStock} units are available. You cannot transfer ${inputQty} units.`
         );
       } else {
         setWarningMessage(null);
@@ -178,6 +178,13 @@ export default function ReportForm({
     if ((txType === 'transfer' || txType === 'adjustment') && !fromLocId) {
       setErrorMessage('Validation Error: Please specify a source/active location.');
       return;
+    }
+
+    if (txType === 'transfer') {
+      if (currentAvailableStock < parsedQty) {
+        setErrorMessage(`Validation Error: Insufficient stock at source location. Only ${currentAvailableStock} units are available for transfer.`);
+        return;
+      }
     }
 
     if (txType === 'receive' && !toLocId) {

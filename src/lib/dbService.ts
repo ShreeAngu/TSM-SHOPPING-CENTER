@@ -582,12 +582,15 @@ export async function editTransactionDoc(
 }
 
 // Wipe & Hard Reset Cloud Firestore
-export async function resetCloudDatabase() {
+export async function resetCloudDatabase(onlyStocks?: boolean) {
   try {
     const batch = writeBatch(db);
 
-    // Delete all existing documents we can find across collections
-    const collectionsToClear = ['locations', 'products', 'varieties', 'stock', 'transactions', 'categoryTree'];
+    // Delete existing documents across selected collections
+    const collectionsToClear = onlyStocks
+      ? ['stock', 'transactions']
+      : ['locations', 'products', 'varieties', 'stock', 'transactions', 'categoryTree'];
+
     for (const collName of collectionsToClear) {
       const snap = await getDocs(collection(db, collName));
       snap.forEach(document => {
@@ -598,11 +601,13 @@ export async function resetCloudDatabase() {
     // Commit deletion
     await batch.commit();
 
-    // Re-seed ONLY the clean physical locations blueprint so the system is fully operational
-    const seedBatch = writeBatch(db);
-    INITIAL_LOCATIONS.forEach(loc => seedBatch.set(doc(db, 'locations', loc.id), loc));
+    if (!onlyStocks) {
+      // Re-seed ONLY the clean physical locations blueprint so the system is fully operational
+      const seedBatch = writeBatch(db);
+      INITIAL_LOCATIONS.forEach(loc => seedBatch.set(doc(db, 'locations', loc.id), loc));
 
-    await seedBatch.commit();
+      await seedBatch.commit();
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'reset_database');
   }
