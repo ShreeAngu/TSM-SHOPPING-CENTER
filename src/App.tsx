@@ -77,6 +77,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isEditor, setIsEditor] = useState<boolean>(false);
   const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [authError, setAuthError] = useState<{ code: string; message: string; isUnauthorizedDomain: boolean } | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -99,6 +100,7 @@ export default function App() {
 
   const handleGoogleSignIn = async () => {
     try {
+      setAuthError(null);
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       const result = await signInWithPopup(auth, provider);
@@ -115,7 +117,12 @@ export default function App() {
       }
     } catch (err: any) {
       console.error('Google Sign-In Error:', err);
-      alert(`Sign-In failed: ${err.message}`);
+      const isUnauthorizedDomain = err.code === 'auth/unauthorized-domain' || (err.message && err.message.includes('unauthorized-domain'));
+      setAuthError({
+        code: err.code || 'unknown',
+        message: err.message || String(err),
+        isUnauthorizedDomain: !!isUnauthorizedDomain
+      });
     }
   };
 
@@ -1047,6 +1054,98 @@ service cloud.firestore {
         </main>
 
       </div>
+
+      {/* Modal: Authentication Error details and guide */}
+      {authError && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50" id="auth-error-modal-overlay">
+          <div className="bg-white rounded-3xl border border-slate-100 p-7 max-w-lg w-full shadow-2xl relative" id="auth-error-modal-content">
+            <button 
+              onClick={() => setAuthError(null)}
+              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors p-1.5 hover:bg-slate-50 rounded-lg cursor-pointer"
+              title="Close"
+              id="auth-error-modal-close-btn"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <div className="flex items-start gap-4 mb-5">
+              <div className="h-12 w-12 rounded-2xl bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-600 shrink-0">
+                <AlertCircle className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-800 leading-snug">Google Sign-In Failed</h3>
+                <p className="text-xs text-slate-400 font-mono mt-1 select-all">Code: {authError.code}</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-rose-50/50 border border-rose-100/60 rounded-2xl p-4 text-xs text-slate-600 leading-relaxed">
+                <p className="font-semibold text-rose-700 mb-1">Error Message:</p>
+                <p className="font-mono text-slate-600 select-all">{authError.message}</p>
+              </div>
+
+              {authError.isUnauthorizedDomain ? (
+                <div className="space-y-3.5 bg-indigo-50/30 border border-indigo-100/50 rounded-2xl p-4 text-xs text-slate-600">
+                  <div className="font-bold text-indigo-950 flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-indigo-600 animate-pulse" />
+                    How to authorize your dev environment:
+                  </div>
+                  <p className="leading-relaxed">
+                    Firebase requires the app's domain to be added to the authorized list for Google Authentication to complete.
+                  </p>
+                  
+                  <div className="space-y-2">
+                    <p className="font-semibold text-slate-700">1. Copy this domain:</p>
+                    <div className="flex items-center gap-2">
+                      <code className="bg-slate-100 border border-slate-200 text-indigo-700 px-3 py-1.5 rounded-xl font-mono font-bold select-all text-xs flex-1 truncate">
+                        {window.location.hostname}
+                      </code>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 leading-relaxed">
+                    <p className="font-semibold text-slate-700">2. Update Firebase settings:</p>
+                    <ol className="list-decimal pl-4.5 space-y-1 text-[11px] text-slate-500">
+                      <li>Go to your <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer" className="text-indigo-600 font-bold hover:underline">Firebase Console</a>.</li>
+                      <li>In the left menu, select <strong>Authentication</strong>.</li>
+                      <li>Click the <strong>Settings</strong> tab at the top.</li>
+                      <li>Select <strong>Authorized domains</strong> from the sidebar/list.</li>
+                      <li>Click <strong>Add domain</strong> and paste <code className="font-mono bg-slate-100 text-slate-700 px-1 py-0.5 rounded">{window.location.hostname}</code>.</li>
+                    </ol>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Please verify your network connection, Google Account selection, or Firebase project configuration settings.
+                </p>
+              )}
+
+              <div className="pt-2 flex gap-3">
+                <button
+                  onClick={() => setAuthError(null)}
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl text-xs font-bold transition-all cursor-pointer text-center"
+                  id="auth-error-dismiss-btn"
+                >
+                  Dismiss
+                </button>
+                {authError.isUnauthorizedDomain && (
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(window.location.hostname);
+                      alert('Domain copied to clipboard!');
+                    }}
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/10 cursor-pointer text-center"
+                    id="auth-error-copy-domain-btn"
+                  >
+                    Copy Domain
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
