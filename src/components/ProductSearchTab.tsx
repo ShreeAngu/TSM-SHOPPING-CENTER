@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, 
   Tag, 
-  DollarSign, 
+  IndianRupee, 
   History, 
   Warehouse, 
   Store, 
@@ -179,7 +179,7 @@ export default function ProductSearchTab({
             <div>
               <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
                 <span>Max Retail Rate (Selling Price)</span>
-                <span className="font-mono text-indigo-600">${maxPriceFilter}</span>
+                <span className="font-mono text-indigo-600">₹{maxPriceFilter}</span>
               </div>
               <input
                 type="range"
@@ -234,7 +234,7 @@ export default function ProductSearchTab({
                       </div>
 
                       <div className="text-right shrink-0">
-                        <p className="text-xs font-mono font-bold text-slate-800">${v.sellingPrice.toFixed(2)}</p>
+                        <p className="text-xs font-mono font-bold text-slate-800">₹{v.sellingPrice.toFixed(2)}</p>
                         <span className={`inline-block text-[10px] font-mono font-bold mt-1 px-1.5 py-0.5 rounded ${
                           total === 0 
                             ? 'bg-rose-50 text-rose-600' 
@@ -356,17 +356,17 @@ export default function ProductSearchTab({
                     <div className="space-y-3.5">
                       <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-500">Unit Cost Price (Owner):</span>
-                        <span className="font-mono font-bold text-slate-700">${activeVariety.costPrice.toFixed(2)}</span>
+                        <span className="font-mono font-bold text-slate-700">₹{activeVariety.costPrice.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-500">Unit Selling Price (Retail):</span>
-                        <span className="font-mono font-bold text-indigo-600">${activeVariety.sellingPrice.toFixed(2)}</span>
+                        <span className="font-mono font-bold text-indigo-600">₹{activeVariety.sellingPrice.toFixed(2)}</span>
                       </div>
                       <hr className="border-slate-100" />
                       <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-500 font-semibold text-slate-600">Absolute Net Markup:</span>
                         <span className="font-mono font-bold text-emerald-600">
-                          +${(activeVariety.sellingPrice - activeVariety.costPrice).toFixed(2)}
+                          +₹{(activeVariety.sellingPrice - activeVariety.costPrice).toFixed(2)}
                         </span>
                       </div>
                       <div className="flex justify-between items-center text-xs">
@@ -394,16 +394,16 @@ export default function ProductSearchTab({
                       </div>
                       <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-500 font-medium text-slate-600">Cumulative Revenue:</span>
-                        <span className="font-mono font-bold text-indigo-700">${financialPerformance.totalRevenue.toFixed(2)}</span>
+                        <span className="font-mono font-bold text-indigo-700">₹{financialPerformance.totalRevenue.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-500">Cost of Goods Sold (COGS):</span>
-                        <span className="font-mono text-slate-500">${financialPerformance.costOfGoods.toFixed(2)}</span>
+                        <span className="font-mono text-slate-500">₹{financialPerformance.costOfGoods.toFixed(2)}</span>
                       </div>
                       <hr className="border-slate-100" />
                       <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-700 font-bold">Logged Net Profit:</span>
-                        <span className="font-mono font-bold text-emerald-600">${financialPerformance.netProfit.toFixed(2)}</span>
+                        <span className="font-mono font-bold text-emerald-600">₹{financialPerformance.netProfit.toFixed(2)}</span>
                       </div>
                     </div>
                   </div>

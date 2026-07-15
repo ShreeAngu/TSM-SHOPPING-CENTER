@@ -340,10 +340,18 @@ export default function App() {
     newVariety: Omit<ProductVariety, 'id'>, 
     initialStockMap: Record<string, number>
   ) => {
+    const enteredSku = newVariety.sku.toUpperCase().trim();
+    const isDuplicate = varieties.some(v => v.sku.toUpperCase().trim() === enteredSku);
+    if (isDuplicate) {
+      alert(`Error: A variety with the SKU "${enteredSku}" is already registered. Please use a unique SKU.`);
+      throw new Error(`SKU "${enteredSku}" already exists.`);
+    }
+
     const generatedId = `v-${Date.now()}`;
     const varietyRecord: ProductVariety = {
       id: generatedId,
-      ...newVariety
+      ...newVariety,
+      sku: enteredSku
     };
     await addVarietyDoc(varietyRecord, initialStockMap);
   };
@@ -485,18 +493,18 @@ export default function App() {
       {/* Upper Navigation Header Bar */}
       <header className="sticky top-0 z-40 bg-white border-b border-slate-100 px-6 py-3.5 flex items-center justify-between shadow-2xs" id="applet-header-bar">
         <div className="flex items-center space-x-3 lg:hidden">
-          <div className="p-2 bg-slate-900 rounded-xl text-white">
-            <Boxes className="h-5 w-5" />
+          <div className="shrink-0">
+            <img src="/src/assets/images/website_icon_1784108516192.jpg" alt="TSM Logo" className="h-8 w-8 rounded-xl object-cover border border-slate-200" referrerPolicy="no-referrer" />
           </div>
           <div>
-            <h1 className="text-sm font-black text-slate-800 tracking-tight leading-none font-display">TSM Suite</h1>
-            <p className="text-[9px] text-indigo-500 font-semibold uppercase tracking-wider mt-0.5">Inventory Desk</p>
+            <h1 className="text-xs font-black text-slate-800 tracking-tight leading-none font-display uppercase">TSM SHOPPING CENTER</h1>
+            <p className="text-[9px] text-indigo-500 font-semibold uppercase tracking-wider mt-0.5">STOCK PORTAL</p>
           </div>
         </div>
 
         <div className="hidden lg:flex items-center space-x-3">
           <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-xs font-semibold text-slate-500 tracking-tight">TSM Centralized Cloud Node (Online)</span>
+          <span className="text-xs font-semibold text-slate-500 tracking-tight">TSM Stock Portal Cloud Node (Online)</span>
         </div>
 
         {/* Live System Time and Backup actions */}
@@ -587,13 +595,13 @@ export default function App() {
         <aside className="lg:w-64 bg-slate-900 text-slate-300 p-5 shrink-0 hidden lg:flex flex-col justify-between border-r border-slate-800" id="applet-sidebar">
           <div className="space-y-8">
             {/* Brand Logo Header */}
-            <div className="flex items-center space-x-3 px-2 py-1">
-              <div className="p-2.5 bg-gradient-to-tr from-indigo-600 to-violet-500 rounded-xl text-white shadow-md shadow-indigo-900/40">
-                <Boxes className="h-5 w-5" />
+            <div className="flex items-center space-x-3 px-1 py-1">
+              <div className="shrink-0 bg-slate-800 p-1.5 rounded-xl border border-slate-700/60 shadow-inner">
+                <img src="/src/assets/images/website_icon_1784108516192.jpg" alt="TSM Logo" className="h-10 w-10 rounded-lg object-cover" referrerPolicy="no-referrer" />
               </div>
               <div>
-                <h1 className="text-lg font-extrabold text-white tracking-tight leading-none font-display">TSM Suite</h1>
-                <p className="text-[10px] text-indigo-400 font-semibold uppercase tracking-widest mt-1">Inventory Desk</p>
+                <h1 className="text-[13px] font-black text-white tracking-tight leading-tight font-display uppercase">TSM SHOPPING</h1>
+                <p className="text-[9px] text-indigo-400 font-bold uppercase tracking-wider mt-0.5">STOCK PORTAL</p>
               </div>
             </div>
 
@@ -1016,6 +1024,7 @@ service cloud.firestore {
                   locations={locations}
                   varieties={varieties}
                   stock={stock}
+                  transactions={transactions}
                   onAddTransaction={handleAddTransaction}
                   isEditor={isEditor}
                 />
@@ -1045,8 +1054,11 @@ service cloud.firestore {
               {activeTab === 'settings' && (
                 <SettingsTab 
                   locations={locations} 
+                  varieties={varieties}
+                  stock={stock}
                   isEditor={isEditor} 
                   onUpdateLocation={handleUpdateLocation}
+                  onAddTransaction={handleAddTransaction}
                 />
               )}
             </>

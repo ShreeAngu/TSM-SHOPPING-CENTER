@@ -9,7 +9,7 @@ import {
   ArrowRightLeft, 
   ArrowUpRight, 
   ArrowDownLeft, 
-  DollarSign,
+  IndianRupee,
   Package,
   Store,
   Warehouse,
@@ -146,12 +146,12 @@ export default function Dashboard({
           id="stat-cost-val"
         >
           <div className="p-3.5 bg-emerald-50 rounded-xl text-emerald-600">
-            <DollarSign className="h-6 w-6" />
+            <IndianRupee className="h-6 w-6" />
           </div>
           <div>
             <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Asset Cost Value</p>
             <h3 className="text-2xl font-bold text-slate-800 font-mono mt-0.5">
-              ${totalValuationCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ₹{totalValuationCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </h3>
             <p className="text-xs text-emerald-600 font-medium mt-1">Our purchase capital</p>
           </div>
@@ -170,7 +170,7 @@ export default function Dashboard({
           <div>
             <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Retail Market Value</p>
             <h3 className="text-2xl font-bold text-slate-800 font-mono mt-0.5">
-              ${totalValuationRetail.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ₹{totalValuationRetail.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </h3>
             <p className="text-xs text-blue-600 font-medium mt-1">
               Margin: {totalValuationCost > 0 ? (((totalValuationRetail - totalValuationCost) / totalValuationRetail) * 100).toFixed(1) : 0}%
@@ -284,7 +284,7 @@ export default function Dashboard({
                         <div>
                           <p className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">Est. Cost Value</p>
                           <p className="text-sm font-bold text-slate-700 font-mono mt-1">
-                            ${locValuation.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            ₹{locValuation.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                           </p>
                         </div>
                       </div>
@@ -677,7 +677,7 @@ export default function Dashboard({
                         {tx.quantity > 0 && tx.type !== 'transfer' ? `+${tx.quantity}` : tx.quantity} pcs
                       </span>
                       <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                        {tx.type === 'sale' ? `Value: $${(tx.sellingPrice * Math.abs(tx.quantity)).toFixed(2)}` : `Cost: $${(tx.costPrice * Math.abs(tx.quantity)).toFixed(2)}`}
+                        {tx.type === 'sale' ? `Value: ₹${(tx.sellingPrice * Math.abs(tx.quantity)).toFixed(2)}` : `Cost: ₹${(tx.costPrice * Math.abs(tx.quantity)).toFixed(2)}`}
                       </div>
                     </div>
                   </div>

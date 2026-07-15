@@ -8,7 +8,7 @@ import {
   ChevronDown, 
   ChevronUp, 
   AlertCircle, 
-  DollarSign, 
+  IndianRupee, 
   Barcode, 
   Warehouse, 
   Store, 
@@ -123,13 +123,20 @@ export default function InventoryManager({
       return;
     }
 
+    const enteredSku = newVarSku.toUpperCase().trim();
+    const isSkuDuplicate = varieties.some(v => v.sku.toUpperCase().trim() === enteredSku);
+    if (isSkuDuplicate) {
+      alert(`Duplicate SKU Error: The SKU "${enteredSku}" is already registered in the system. Please enter a unique SKU.`);
+      return;
+    }
+
     const parentProduct = products.find(p => p.id === selectedParentProductId);
     if (!parentProduct) return;
 
     onAddVariety({
       productId: selectedParentProductId,
       productName: parentProduct.name,
-      sku: newVarSku.toUpperCase().trim(),
+      sku: enteredSku,
       varietyName: newVarName,
       costPrice: parseFloat(newVarCost),
       sellingPrice: parseFloat(newVarSell),
@@ -436,10 +443,10 @@ export default function InventoryManager({
                                         </div>
                                       </td>
                                       <td className="py-3 px-3 text-right font-mono font-medium text-slate-600">
-                                        ${variety.costPrice.toFixed(2)}
+                                        ₹{variety.costPrice.toFixed(2)}
                                       </td>
                                       <td className="py-3 px-3 text-right font-mono font-bold text-slate-800">
-                                        ${variety.sellingPrice.toFixed(2)}
+                                        ₹{variety.sellingPrice.toFixed(2)}
                                       </td>
                                       <td className="py-3 px-3 text-right font-mono font-semibold text-emerald-600">
                                         {markup.toFixed(1)}%
@@ -674,16 +681,25 @@ export default function InventoryManager({
                     placeholder="e.g. HB-SAF-TAN-L"
                     value={newVarSku}
                     onChange={(e) => setNewVarSku(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white font-mono uppercase"
+                    className={`w-full border rounded-xl px-3.5 py-2 text-sm focus:outline-hidden font-mono uppercase ${
+                      newVarSku.toUpperCase().trim() !== '' && varieties.some(v => v.sku.toUpperCase().trim() === newVarSku.toUpperCase().trim())
+                        ? 'bg-rose-50 border-rose-300 text-rose-800 focus:border-rose-500'
+                        : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-indigo-500 focus:bg-white'
+                    }`}
                     required
                   />
+                  {newVarSku.toUpperCase().trim() !== '' && varieties.some(v => v.sku.toUpperCase().trim() === newVarSku.toUpperCase().trim()) && (
+                    <p className="text-[10px] text-rose-600 font-bold mt-1.5 flex items-center gap-1 animate-pulse">
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0" /> SKU already in use!
+                    </p>
+                  )}
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                    <DollarSign className="h-3 w-3 text-emerald-600" /> Cost Price (To Purchase)
+                    <IndianRupee className="h-3 w-3 text-emerald-600" /> Cost Price (To Purchase)
                   </label>
                   <input
                     type="number"
@@ -697,7 +713,7 @@ export default function InventoryManager({
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                    <DollarSign className="h-3 w-3 text-indigo-600" /> Selling Price (Retail)
+                    <IndianRupee className="h-3 w-3 text-indigo-600" /> Selling Price (Retail)
                   </label>
                   <input
                     type="number"
@@ -766,7 +782,12 @@ export default function InventoryManager({
               <div className="pt-3">
                 <button
                   type="submit"
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-xl text-xs font-semibold transition-all shadow-xs cursor-pointer"
+                  disabled={newVarSku.toUpperCase().trim() !== '' && varieties.some(v => v.sku.toUpperCase().trim() === newVarSku.toUpperCase().trim())}
+                  className={`w-full py-2.5 rounded-xl text-xs font-semibold transition-all shadow-xs ${
+                    newVarSku.toUpperCase().trim() !== '' && varieties.some(v => v.sku.toUpperCase().trim() === newVarSku.toUpperCase().trim())
+                      ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                      : 'bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer'
+                  }`}
                 >
                   Create Variety SKU
                 </button>

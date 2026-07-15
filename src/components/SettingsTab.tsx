@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Settings, 
   Warehouse, 
@@ -9,9 +9,15 @@ import {
   AlertCircle, 
   MapPin, 
   Info,
-  Edit2
+  Edit2,
+  IndianRupee,
+  ArrowRightLeft,
+  AlertTriangle,
+  Trash2,
+  ChevronRight,
+  HelpCircle
 } from 'lucide-react';
-import { Location } from '../types';
+import { Location, ProductVariety, StockLevel, Transaction } from '../types';
 import { 
   MASTER_POOL_WAREHOUSES, 
   MASTER_POOL_STORES, 
@@ -20,11 +26,21 @@ import {
 
 interface SettingsTabProps {
   locations: Location[];
+  varieties: ProductVariety[];
+  stock: StockLevel[];
   isEditor?: boolean;
   onUpdateLocation?: (location: Location) => Promise<void>;
+  onAddTransaction?: (transaction: Omit<Transaction, 'id' | 'timestamp'> & { timestamp?: string }) => Promise<void>;
 }
 
-export default function SettingsTab({ locations, isEditor = false, onUpdateLocation }: SettingsTabProps) {
+export default function SettingsTab({ 
+  locations, 
+  varieties,
+  stock,
+  isEditor = false, 
+  onUpdateLocation,
+  onAddTransaction
+}: SettingsTabProps) {
   // Determine current active counts from locations
   const currentWarehouseCount = locations.filter(l => l.type === 'warehouse').length;
   const currentStoreCount = locations.filter(l => l.type === 'store').length;
@@ -44,7 +60,17 @@ export default function SettingsTab({ locations, isEditor = false, onUpdateLocat
     if (currentStoreCount > 0) setStoreCount(currentStoreCount);
   }, [currentWarehouseCount, currentStoreCount]);
 
-  const handleApplyChanges = async () => {
+  // Deactivation wizard states
+  const [showDeactivationWizard, setShowDeactivationWizard] = useState<boolean>(false);
+  const [deactivationLocations, setDeactivationLocations] = useState<Location[]>([]);
+  const [deactivationStock, setDeactivationStock] = useState<StockLevel[]>([]);
+  const [currentWizardStep, setCurrentWizardStep] = useState<number>(0);
+  const [deactivationStrategy, setDeactivationStrategy] = useState<'discard' | 'bulk' | 'individual'>('discard');
+  const [bulkTargetLocationId, setBulkTargetLocationId] = useState<string>('');
+  const [individualTargets, setIndividualTargets] = useState<Record<string, string>>({}); // key: varietyId_fromLocId -> toLocationId
+  const [isProcessingDeactivation, setIsProcessingDeactivation] = useState<boolean>(false);
+
+  const executeScaling = async () => {
     setIsSyncing(true);
     setSyncSuccess(false);
     setSyncError(null);
@@ -57,6 +83,132 @@ export default function SettingsTab({ locations, isEditor = false, onUpdateLocat
       setSyncError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleApplyChanges = async () => {
+    // Determine which locations are being removed
+    const warehousesBeingRemoved = locations.filter(l => l.type === 'warehouse' && !MASTER_POOL_WAREHOUSES.slice(0, warehouseCount).some(m => m.id === l.id));
+    const storesBeingRemoved = locations.filter(l => l.type === 'store' && !MASTER_POOL_STORES.slice(0, storeCount).some(m => m.id === l.id));
+    const removed = [...warehousesBeingRemoved, ...storesBeingRemoved];
+
+    if (removed.length > 0) {
+      // Find if those locations have any stock
+      const stockInRemoved = stock.filter(s => removed.some(r => r.id === s.locationId) && s.quantity > 0);
+      if (stockInRemoved.length > 0) {
+        setDeactivationLocations(removed);
+        setDeactivationStock(stockInRemoved);
+        setCurrentWizardStep(0);
+        setDeactivationStrategy('discard');
+        // Pre-fill bulk target with first remaining active location
+        const remainingWarehouses = MASTER_POOL_WAREHOUSES.slice(0, warehouseCount);
+        const remainingStores = MASTER_POOL_STORES.slice(0, storeCount);
+        const remaining = [...remainingWarehouses, ...remainingStores];
+        if (remaining.length > 0) {
+          setBulkTargetLocationId(remaining[0].id);
+        }
+        // Pre-fill individual targets
+        const initialInd: Record<string, string> = {};
+        stockInRemoved.forEach(s => {
+          if (remaining.length > 0) {
+            initialInd[`${s.varietyId}_${s.locationId}`] = remaining[0].id;
+          }
+        });
+        setIndividualTargets(initialInd);
+        setShowDeactivationWizard(true);
+        return;
+      }
+    }
+
+    await executeScaling();
+  };
+
+  const handleConfirmDeactivation = async () => {
+    setIsProcessingDeactivation(true);
+    try {
+      if (!onAddTransaction) {
+        throw new Error('Transaction logging handler is not available.');
+      }
+
+      // Loop through stock items that need to be resolved
+      for (const item of deactivationStock) {
+        const variety = varieties.find(v => v.id === item.varietyId);
+        if (!variety) continue;
+
+        const sourceLoc = locations.find(l => l.id === item.locationId);
+        const sourceName = sourceLoc ? sourceLoc.name : item.locationId;
+
+        if (deactivationStrategy === 'discard') {
+          // Log adjustment to discard stock (quantity = -item.quantity)
+          await onAddTransaction({
+            type: 'adjustment',
+            sku: variety.sku,
+            varietyId: variety.id,
+            productId: variety.productId,
+            varietyName: variety.varietyName,
+            productName: variety.productName,
+            fromLocationId: item.locationId,
+            quantity: -item.quantity,
+            reportedBy: 'TSM Admin (Deactivation Audit)',
+            notes: `Discarded stock of ${variety.varietyName} due to deactivation of ${sourceName}.`,
+            costPrice: variety.costPrice,
+            sellingPrice: variety.sellingPrice
+          });
+        } else if (deactivationStrategy === 'bulk') {
+          const targetLocId = bulkTargetLocationId;
+          const targetLoc = [...MASTER_POOL_WAREHOUSES, ...MASTER_POOL_STORES].find(l => l.id === targetLocId);
+          const targetName = targetLoc ? targetLoc.name : targetLocId;
+
+          // Log transfer from source to bulk target location
+          await onAddTransaction({
+            type: 'transfer',
+            sku: variety.sku,
+            varietyId: variety.id,
+            productId: variety.productId,
+            varietyName: variety.varietyName,
+            productName: variety.productName,
+            fromLocationId: item.locationId,
+            toLocationId: targetLocId,
+            quantity: item.quantity,
+            reportedBy: 'TSM Admin (Deactivation Audit)',
+            notes: `Bulk transferred stock of ${variety.varietyName} from deactivated ${sourceName} to ${targetName}.`,
+            costPrice: variety.costPrice,
+            sellingPrice: variety.sellingPrice
+          });
+        } else if (deactivationStrategy === 'individual') {
+          const targetLocId = individualTargets[`${item.varietyId}_${item.locationId}`];
+          if (!targetLocId) continue;
+          
+          const targetLoc = [...MASTER_POOL_WAREHOUSES, ...MASTER_POOL_STORES].find(l => l.id === targetLocId);
+          const targetName = targetLoc ? targetLoc.name : targetLocId;
+
+          // Log transfer from source to individual target location
+          await onAddTransaction({
+            type: 'transfer',
+            sku: variety.sku,
+            varietyId: variety.id,
+            productId: variety.productId,
+            varietyName: variety.varietyName,
+            productName: variety.productName,
+            fromLocationId: item.locationId,
+            toLocationId: targetLocId,
+            quantity: item.quantity,
+            reportedBy: 'TSM Admin (Deactivation Audit)',
+            notes: `Transferred stock of ${variety.varietyName} from deactivated ${sourceName} to ${targetName}.`,
+            costPrice: variety.costPrice,
+            sellingPrice: variety.sellingPrice
+          });
+        }
+      }
+
+      // After resolving all stock, execute the location scaling
+      await executeScaling();
+      setShowDeactivationWizard(false);
+    } catch (err) {
+      console.error('Error resolving stocks during deactivation:', err);
+      alert('Error during stock deactivation: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsProcessingDeactivation(false);
     }
   };
 
@@ -382,6 +534,288 @@ export default function SettingsTab({ locations, isEditor = false, onUpdateLocat
                 Save Details
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Stock Deactivation Wizard */}
+      {showDeactivationWizard && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl border border-slate-100 p-6 max-w-xl w-full shadow-lg overflow-y-auto max-h-[90vh] space-y-6">
+            <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-2.5 text-amber-600">
+                <AlertTriangle className="h-6 w-6 animate-pulse" />
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">
+                    Active Stock Safeguard Wizard
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    You are deactivating location nodes with active inventory. Please choose how to route these stocks.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowDeactivationWizard(false)}
+                className="text-slate-400 hover:text-slate-600 text-sm font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+
+            {/* List of deactivated locations and their stocked items */}
+            <div className="bg-amber-50/50 border border-amber-200/60 rounded-xl p-4 text-xs space-y-2.5">
+              <span className="font-bold text-amber-800 uppercase tracking-wider text-[10px]">
+                Affected Stock Levels:
+              </span>
+              <div className="max-h-[140px] overflow-y-auto space-y-1.5 pr-1">
+                {deactivationStock.map(s => {
+                  const loc = locations.find(l => l.id === s.locationId);
+                  const variety = varieties.find(v => v.id === s.varietyId);
+                  return (
+                    <div key={`${s.varietyId}_${s.locationId}`} className="flex justify-between items-center bg-white border border-slate-100 p-2 rounded-lg">
+                      <div>
+                        <span className="font-semibold text-slate-700">{variety?.productName}</span>
+                        <span className="text-slate-500 ml-1">({variety?.varietyName})</span>
+                        <p className="text-[10px] text-slate-400">Location: {loc?.name}</p>
+                      </div>
+                      <span className="font-mono font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded">
+                        {s.quantity} pcs
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Step 1: Strategy Selection */}
+            {currentWizardStep === 0 && (
+              <div className="space-y-4">
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Select Stock Strategy:
+                </label>
+                <div className="grid grid-cols-1 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setDeactivationStrategy('discard')}
+                    className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
+                      deactivationStrategy === 'discard'
+                        ? 'border-indigo-600 bg-indigo-50/20'
+                        : 'border-slate-100 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Trash2 className="h-5 w-5 text-rose-500 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-bold text-slate-800 text-xs">Discard All Stocks (Write-off)</h4>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Write down all remaining items to zero. This will log an adjustment write-off transaction.
+                      </p>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDeactivationStrategy('bulk')}
+                    className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
+                      deactivationStrategy === 'bulk'
+                        ? 'border-indigo-600 bg-indigo-50/20'
+                        : 'border-slate-100 hover:bg-slate-50'
+                    }`}
+                  >
+                    <ArrowRightLeft className="h-5 w-5 text-indigo-500 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-bold text-slate-800 text-xs">Bulk Transfer to Another Node</h4>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Transfer all orphaned stocks completely to a single active warehouse or store.
+                      </p>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDeactivationStrategy('individual')}
+                    className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
+                      deactivationStrategy === 'individual'
+                        ? 'border-indigo-600 bg-indigo-50/20'
+                        : 'border-slate-100 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Settings className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-bold text-slate-800 text-xs">Transfer Each Item Individually</h4>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Map and route each variety and category independently to specific target active locations.
+                      </p>
+                    </div>
+                  </button>
+                </div>
+
+                <div className="flex justify-end pt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (deactivationStrategy === 'discard') {
+                        setCurrentWizardStep(2); // Skip straight to confirm
+                      } else {
+                        setCurrentWizardStep(1); // Go to configure targets
+                      }
+                    }}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    Continue <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 2: Strategy Configuration */}
+            {currentWizardStep === 1 && (
+              <div className="space-y-4">
+                {deactivationStrategy === 'bulk' ? (
+                  <div className="space-y-3">
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
+                      Select Target Destination Node:
+                    </label>
+                    <select
+                      value={bulkTargetLocationId}
+                      onChange={(e) => setBulkTargetLocationId(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white font-medium"
+                    >
+                      {[
+                        ...MASTER_POOL_WAREHOUSES.slice(0, warehouseCount),
+                        ...MASTER_POOL_STORES.slice(0, storeCount)
+                      ].map(loc => (
+                        <option key={loc.id} value={loc.id}>
+                          {loc.name} ({loc.type === 'warehouse' ? 'Warehouse' : 'Retail Store'})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-slate-400">
+                      All items from deactivated nodes will automatically register as a ledger stock transfer to this node.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                      Route Each Variety Individually:
+                    </label>
+                    <div className="max-h-[250px] overflow-y-auto space-y-2 pr-1" id="individual-route-mapping">
+                      {deactivationStock.map(s => {
+                        const variety = varieties.find(v => v.id === s.varietyId);
+                        const locFrom = locations.find(l => l.id === s.locationId);
+                        const key = `${s.varietyId}_${s.locationId}`;
+                        const currentTarget = individualTargets[key] || '';
+
+                        return (
+                          <div key={key} className="border border-slate-100 rounded-xl p-3 bg-slate-50/50 space-y-2">
+                            <div className="flex justify-between items-start text-xs">
+                              <div>
+                                <h4 className="font-bold text-slate-700 leading-tight">
+                                  {variety?.productName} ({variety?.varietyName})
+                                </h4>
+                                <p className="text-[10px] text-slate-400 mt-0.5">
+                                  From: {locFrom?.name} | SKU: {variety?.sku}
+                                </p>
+                              </div>
+                              <span className="font-mono font-bold bg-white border border-slate-200 px-1.5 py-0.5 rounded text-slate-600 shrink-0 text-[11px]">
+                                {s.quantity} pcs
+                              </span>
+                            </div>
+
+                            <div className="space-y-1">
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Target Destination:</span>
+                              <select
+                                value={currentTarget}
+                                onChange={(e) => setIndividualTargets({
+                                  ...individualTargets,
+                                  [key]: e.target.value
+                                })}
+                                className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-hidden focus:border-indigo-500"
+                              >
+                                {[
+                                  ...MASTER_POOL_WAREHOUSES.slice(0, warehouseCount),
+                                  ...MASTER_POOL_STORES.slice(0, storeCount)
+                                ].map(loc => (
+                                  <option key={loc.id} value={loc.id}>
+                                    {loc.name} ({loc.type === 'warehouse' ? 'Warehouse' : 'Store'})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-between pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentWizardStep(0)}
+                    className="px-3.5 py-1.5 border border-slate-200 rounded-xl text-slate-600 font-bold text-xs hover:bg-slate-50 transition-all cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentWizardStep(2)}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    Review & Confirm <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 3: Final Review and Execution */}
+            {currentWizardStep === 2 && (
+              <div className="space-y-4">
+                <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 text-xs text-indigo-800 space-y-2">
+                  <h4 className="font-bold flex items-center gap-1 text-xs">
+                    <Check className="h-4 w-4" /> Ready to Apply Stock Mitigation
+                  </h4>
+                  <p className="text-[11px] leading-relaxed">
+                    You have selected: <strong className="uppercase">{deactivationStrategy === 'discard' ? 'Discard Stocks' : deactivationStrategy === 'bulk' ? 'Bulk Transfer' : 'Individual Transfer'}</strong> strategy.
+                  </p>
+                  <p className="text-[11px] leading-relaxed">
+                    {deactivationStock.length} stock line entries will be parsed and re-routed. Once confirmed, the system will execute backend ledger mutations and deactivate {deactivationLocations.length} locations.
+                  </p>
+                </div>
+
+                <div className="flex justify-between pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (deactivationStrategy === 'discard') {
+                        setCurrentWizardStep(0);
+                      } else {
+                        setCurrentWizardStep(1);
+                      }
+                    }}
+                    className="px-3.5 py-1.5 border border-slate-200 rounded-xl text-slate-600 font-bold text-xs hover:bg-slate-50 transition-all cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmDeactivation}
+                    disabled={isProcessingDeactivation}
+                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                  >
+                    {isProcessingDeactivation ? (
+                      <>
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        Processing Stocks...
+                      </>
+                    ) : (
+                      <>
+                        Apply & Deactivate Nodes
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
