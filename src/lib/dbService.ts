@@ -581,6 +581,73 @@ export async function editTransactionDoc(
   }
 }
 
+// Revoke a logged transaction and revert its stock levels
+export async function revokeTransactionDoc(tx: Transaction, stockLevels: StockLevel[]) {
+  try {
+    const batch = writeBatch(db);
+
+    // 1. Delete the transaction
+    batch.delete(doc(db, 'transactions', tx.id));
+
+    // 2. Adjust Stock back
+    const { type, varietyId, fromLocationId, toLocationId, quantity } = tx;
+
+    if (type === 'receive' && toLocationId) {
+      const stockId = `${varietyId}_${toLocationId}`;
+      const currentStockObj = stockLevels.find(s => s.varietyId === varietyId && s.locationId === toLocationId);
+      const currentQty = currentStockObj ? currentStockObj.quantity : 0;
+      batch.set(doc(db, 'stock', stockId), {
+        varietyId,
+        locationId: toLocationId,
+        quantity: Math.max(0, currentQty - quantity)
+      });
+    } else if (type === 'sale' && fromLocationId) {
+      const stockId = `${varietyId}_${fromLocationId}`;
+      const currentStockObj = stockLevels.find(s => s.varietyId === varietyId && s.locationId === fromLocationId);
+      const currentQty = currentStockObj ? currentStockObj.quantity : 0;
+      batch.set(doc(db, 'stock', stockId), {
+        varietyId,
+        locationId: fromLocationId,
+        quantity: Math.max(0, currentQty + quantity)
+      });
+    } else if (type === 'transfer' && fromLocationId && toLocationId) {
+      const fromStockId = `${varietyId}_${fromLocationId}`;
+      const toStockId = `${varietyId}_${toLocationId}`;
+
+      const currentFromStockObj = stockLevels.find(s => s.varietyId === varietyId && s.locationId === fromLocationId);
+      const currentFromQty = currentFromStockObj ? currentFromStockObj.quantity : 0;
+
+      const currentToStockObj = stockLevels.find(s => s.varietyId === varietyId && s.locationId === toLocationId);
+      const currentToQty = currentToStockObj ? currentToStockObj.quantity : 0;
+
+      batch.set(doc(db, 'stock', fromStockId), {
+        varietyId,
+        locationId: fromLocationId,
+        quantity: Math.max(0, currentFromQty + quantity)
+      });
+
+      batch.set(doc(db, 'stock', toStockId), {
+        varietyId,
+        locationId: toLocationId,
+        quantity: Math.max(0, currentToQty - quantity)
+      });
+    } else if (type === 'adjustment' && fromLocationId) {
+      const stockId = `${varietyId}_${fromLocationId}`;
+      const currentStockObj = stockLevels.find(s => s.varietyId === varietyId && s.locationId === fromLocationId);
+      const currentQty = currentStockObj ? currentStockObj.quantity : 0;
+      batch.set(doc(db, 'stock', stockId), {
+        varietyId,
+        locationId: fromLocationId,
+        quantity: Math.max(0, currentQty - quantity)
+      });
+    }
+
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `transactions_revoke/${tx.id}`);
+  }
+}
+
 // Wipe & Hard Reset Cloud Firestore
 export async function resetCloudDatabase(onlyStocks?: boolean) {
   try {

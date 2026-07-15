@@ -54,7 +54,8 @@ import {
   updateLocationDoc,
   updateProductDoc,
   editTransactionDoc,
-  resetCloudDatabase
+  resetCloudDatabase,
+  revokeTransactionDoc
 } from './lib/dbService';
 import { writeBatch, doc } from 'firebase/firestore';
 import { db, auth } from './lib/firebase';
@@ -411,6 +412,10 @@ export default function App() {
     const toLocStock = toLocStockObj ? toLocStockObj.quantity : 0;
 
     await addTransactionDoc(txRecord, fromLocStock, toLocStock);
+  };
+
+  const handleRevokeTransaction = async (txRecord: Transaction) => {
+    await revokeTransactionDoc(txRecord, stock);
   };
 
   // 6. Category Tree Management
@@ -1181,6 +1186,7 @@ service cloud.firestore {
                     stock={stock}
                     transactions={transactions}
                     onAddTransaction={handleAddTransaction}
+                    onRevokeTransaction={handleRevokeTransaction}
                     isEditor={isEditor}
                   />
                 </>

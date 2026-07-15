@@ -21,7 +21,8 @@ import {
   RefreshCw,
   Search,
   History,
-  IndianRupee
+  IndianRupee,
+  Trash2
 } from 'lucide-react';
 import { Location, ProductVariety, StockLevel, Transaction, TransactionType } from '../types';
 
@@ -31,6 +32,7 @@ interface ReportFormProps {
   stock: StockLevel[];
   transactions?: Transaction[];
   onAddTransaction: (transaction: Omit<Transaction, 'id' | 'timestamp'> & { timestamp?: string }) => void;
+  onRevokeTransaction?: (transaction: Transaction) => Promise<void>;
   isEditor?: boolean;
 }
 
@@ -40,6 +42,7 @@ export default function ReportForm({
   stock,
   transactions = [],
   onAddTransaction,
+  onRevokeTransaction,
   isEditor = false
 }: ReportFormProps) {
   // Navigation sub-tab state
@@ -47,6 +50,9 @@ export default function ReportForm({
 
   // Form type
   const [txType, setTxType] = useState<TransactionType>('transfer');
+  
+  // State for revoking loader
+  const [isRevoking, setIsRevoking] = useState(false);
   
   // Custom variety searchable dropdown states
   const [searchQuery, setSearchQuery] = useState('');
@@ -1037,6 +1043,77 @@ export default function ReportForm({
           </span>
         </div>
 
+        {/* Revoke Last Log Quick Action Banner */}
+        {isEditor && transactions.length > 0 && (
+          (() => {
+            const lastTx = transactions[0];
+            const lastTxDate = new Date(lastTx.timestamp);
+            const formattedLastTxDate = lastTxDate.toLocaleDateString(undefined, {
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            });
+            const lastFromLoc = locations.find(l => l.id === lastTx.fromLocationId)?.name || 'Unknown';
+            const lastToLoc = locations.find(l => l.id === lastTx.toLocationId)?.name || 'Unknown';
+            
+            return (
+              <div className="bg-amber-50/50 border border-amber-200/60 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 text-amber-800 text-xs font-bold">
+                    <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                    Most Recent Logged Action (Reversible)
+                  </div>
+                  <p className="text-xs text-slate-600">
+                    <span className="font-semibold text-slate-800">{lastTx.reportedBy}</span> logged{' '}
+                    <span className="font-bold text-slate-800 capitalize">{lastTx.type}</span> of{' '}
+                    <span className="font-semibold text-slate-800">{lastTx.quantity} pcs</span> of{' '}
+                    <span className="font-semibold text-slate-800">{lastTx.varietyName} ({lastTx.sku})</span>{' '}
+                    {lastTx.type === 'transfer' && `from ${lastFromLoc} to ${lastToLoc}`}
+                    {lastTx.type === 'receive' && `to ${lastToLoc}`}
+                    {lastTx.type === 'sale' && `from ${lastFromLoc}`}
+                    {lastTx.type === 'adjustment' && `at ${lastFromLoc}`}
+                    {' '}on <span className="font-mono text-[11px] text-slate-500">{formattedLastTxDate}</span>.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (window.confirm(`Are you sure you want to revoke and completely delete this last transaction?\n\nActivity: ${lastTx.type.toUpperCase()} (${lastTx.quantity} pcs)\nItem: ${lastTx.varietyName} (${lastTx.sku})\n\nThis will restore the previous stock level at the location(s) and delete this log from the history.`)) {
+                      setIsRevoking(true);
+                      try {
+                        if (onRevokeTransaction) {
+                          await onRevokeTransaction(lastTx);
+                          alert('Success! The last transaction was revoked and stock levels have been restored back.');
+                        }
+                      } catch (err) {
+                        console.error(err);
+                        alert('Error revoking transaction.');
+                      } finally {
+                        setIsRevoking(false);
+                      }
+                    }
+                  }}
+                  disabled={isRevoking}
+                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 px-3.5 py-1.5 rounded-lg text-xs font-semibold border border-rose-200 hover:border-rose-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer flex items-center gap-1.5 shrink-0 self-start md:self-center"
+                >
+                  {isRevoking ? (
+                    <>
+                      <RefreshCw className="h-3 w-3 animate-spin" />
+                      Revoking...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="h-3 w-3" />
+                      Revoke Last Log
+                    </>
+                  )}
+                </button>
+              </div>
+            );
+          })()
+        )}
+
         {/* Filters */}
         <div className="flex flex-col md:flex-row md:items-center gap-4 border-t border-slate-50 pt-4">
           <div className="relative flex-1">
@@ -1083,8 +1160,9 @@ export default function ReportForm({
                   <th className="py-2.5 px-3">Item Details</th>
                   <th className="py-2.5 px-3">Locations Involved</th>
                   <th className="py-2.5 px-3 text-center">Qty</th>
-                  <th className="py-2.5 px-3 text-right">Value/Cost</th>
+                  <th className="py-2.5 px-3">Value/Cost</th>
                   <th className="py-2.5 px-3">Reported By</th>
+                  {isEditor && <th className="py-2.5 px-3 text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1172,6 +1250,38 @@ export default function ReportForm({
                           </p>
                         )}
                       </td>
+                      {isEditor && (
+                        <td className="py-3 px-3 text-right whitespace-nowrap">
+                          {tx.id === transactions[0]?.id ? (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (window.confirm(`Are you sure you want to revoke and completely delete this last transaction?\n\nActivity: ${tx.type.toUpperCase()} (${tx.quantity} pcs)\nItem: ${tx.varietyName} (${tx.sku})\n\nThis will restore the previous stock level at the location(s) and delete this log from the history.`)) {
+                                  setIsRevoking(true);
+                                  try {
+                                    if (onRevokeTransaction) {
+                                      await onRevokeTransaction(tx);
+                                      alert('Success! The last transaction was revoked and stock levels have been restored back.');
+                                    }
+                                  } catch (err) {
+                                    console.error(err);
+                                    alert('Error revoking transaction.');
+                                  } finally {
+                                    setIsRevoking(false);
+                                  }
+                                }
+                              }}
+                              disabled={isRevoking}
+                              className="text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 font-bold px-2 py-1 rounded text-[10px] transition-all cursor-pointer disabled:opacity-50"
+                              title="Revoke and Undo this transaction"
+                            >
+                              Revoke
+                            </button>
+                          ) : (
+                            <span className="text-slate-300 text-[10px]">-</span>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
