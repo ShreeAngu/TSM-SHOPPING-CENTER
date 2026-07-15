@@ -336,17 +336,29 @@ export const MASTER_POOL_STORES: Location[] = [
 
 export async function updateLocationsCountInDb(warehouseCount: number, storeCount: number) {
   try {
-    const desiredWarehouses = MASTER_POOL_WAREHOUSES.slice(0, warehouseCount);
-    const desiredStores = MASTER_POOL_STORES.slice(0, storeCount);
+    // Get current locations in database to preserve customized name/address
+    const locationsSnap = await getDocs(collection(db, 'locations'));
+    const currentLocs: Record<string, Location> = {};
+    locationsSnap.forEach(doc => {
+      currentLocs[doc.id] = doc.data() as Location;
+    });
+
+    const desiredWarehouses = MASTER_POOL_WAREHOUSES.slice(0, warehouseCount).map(wh => {
+      if (currentLocs[wh.id]) {
+        return currentLocs[wh.id]; // Keep edited values
+      }
+      return wh;
+    });
+
+    const desiredStores = MASTER_POOL_STORES.slice(0, storeCount).map(st => {
+      if (currentLocs[st.id]) {
+        return currentLocs[st.id]; // Keep edited values
+      }
+      return st;
+    });
+
     const desiredLocations = [...desiredWarehouses, ...desiredStores];
     const desiredIds = new Set(desiredLocations.map(l => l.id));
-
-    // Get current locations in database
-    const locationsSnap = await getDocs(collection(db, 'locations'));
-    const currentLocIds: string[] = [];
-    locationsSnap.forEach(doc => {
-      currentLocIds.push(doc.id);
-    });
 
     const batch = writeBatch(db);
 
@@ -357,7 +369,7 @@ export async function updateLocationsCountInDb(warehouseCount: number, storeCoun
     });
 
     // 2. Delete current locations that are NOT in the desired set
-    currentLocIds.forEach(id => {
+    Object.keys(currentLocs).forEach(id => {
       if (!desiredIds.has(id)) {
         batch.delete(doc(db, 'locations', id));
       }
@@ -483,6 +495,89 @@ export async function addTransactionDoc(
     await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `transactions/${tx.id}`);
+  }
+}
+
+// Update single location details
+export async function updateLocationDoc(location: Location) {
+  try {
+    await setDoc(doc(db, 'locations', location.id), cleanDocData(location));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `locations/${location.id}`);
+  }
+}
+
+// Update product fields
+export async function updateProductDoc(product: Product) {
+  try {
+    await setDoc(doc(db, 'products', product.id), cleanDocData(product));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `products/${product.id}`);
+  }
+}
+
+// Atomic update for transaction edit and stock level delta corrections
+export async function editTransactionDoc(
+  oldTx: Transaction,
+  newTx: Transaction,
+  stockLevels: StockLevel[]
+) {
+  try {
+    const batch = writeBatch(db);
+
+    // 1. Update the transaction document
+    batch.set(doc(db, 'transactions', newTx.id), cleanDocData(newTx));
+
+    // 2. Track changes in stock level across variety and location combos
+    const stockDeltas: Record<string, number> = {};
+
+    const addDelta = (vId: string, locId: string, delta: number) => {
+      const key = `${vId}_${locId}`;
+      stockDeltas[key] = (stockDeltas[key] || 0) + delta;
+    };
+
+    // --- Revert old transaction effect ---
+    if (oldTx.type === 'receive' && oldTx.toLocationId) {
+      addDelta(oldTx.varietyId, oldTx.toLocationId, -oldTx.quantity);
+    } else if (oldTx.type === 'sale' && oldTx.fromLocationId) {
+      addDelta(oldTx.varietyId, oldTx.fromLocationId, oldTx.quantity);
+    } else if (oldTx.type === 'transfer' && oldTx.fromLocationId && oldTx.toLocationId) {
+      addDelta(oldTx.varietyId, oldTx.fromLocationId, oldTx.quantity);
+      addDelta(oldTx.varietyId, oldTx.toLocationId, -oldTx.quantity);
+    } else if (oldTx.type === 'adjustment' && oldTx.fromLocationId) {
+      addDelta(oldTx.varietyId, oldTx.fromLocationId, -oldTx.quantity);
+    }
+
+    // --- Apply new transaction effect ---
+    if (newTx.type === 'receive' && newTx.toLocationId) {
+      addDelta(newTx.varietyId, newTx.toLocationId, newTx.quantity);
+    } else if (newTx.type === 'sale' && newTx.fromLocationId) {
+      addDelta(newTx.varietyId, newTx.fromLocationId, -newTx.quantity);
+    } else if (newTx.type === 'transfer' && newTx.fromLocationId && newTx.toLocationId) {
+      addDelta(newTx.varietyId, newTx.fromLocationId, -newTx.quantity);
+      addDelta(newTx.varietyId, newTx.toLocationId, newTx.quantity);
+    } else if (newTx.type === 'adjustment' && newTx.fromLocationId) {
+      addDelta(newTx.varietyId, newTx.fromLocationId, newTx.quantity);
+    }
+
+    // 3. Write corrections to Firestore
+    Object.entries(stockDeltas).forEach(([key, delta]) => {
+      if (delta === 0) return;
+      const [vId, locId] = key.split('_');
+      const currentObj = stockLevels.find(s => s.varietyId === vId && s.locationId === locId);
+      const currentQty = currentObj ? currentObj.quantity : 0;
+      const newQty = Math.max(0, currentQty + delta);
+
+      batch.set(doc(db, 'stock', key), {
+        varietyId: vId,
+        locationId: locId,
+        quantity: newQty
+      });
+    });
+
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `transactions_edit/${newTx.id}`);
   }
 }
 

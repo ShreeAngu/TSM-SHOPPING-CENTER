@@ -24,6 +24,8 @@ interface InventoryManagerProps {
   locations: Location[];
   stock: StockLevel[];
   onAddProduct: (product: Omit<Product, 'id'>) => void;
+  onEditProduct: (productId: string, updated: Omit<Product, 'id'>) => Promise<void>;
+  onDeleteProduct: (productId: string) => Promise<void>;
   onAddVariety: (variety: Omit<ProductVariety, 'id'>, initialStocks: Record<string, number>) => void;
   onDeleteVariety: (varietyId: string) => void;
   isEditor?: boolean;
@@ -35,6 +37,8 @@ export default function InventoryManager({
   locations,
   stock,
   onAddProduct,
+  onEditProduct,
+  onDeleteProduct,
   onAddVariety,
   onDeleteVariety,
   isEditor = false
@@ -44,6 +48,16 @@ export default function InventoryManager({
   
   // Expanded state for product rows
   const [expandedProducts, setExpandedProducts] = useState<Record<string, boolean>>({});
+
+  // Editing Product category state
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [editProdName, setEditProdName] = useState('');
+  const [editProdCategory, setEditProdCategory] = useState('');
+  const [editProdDesc, setEditProdDesc] = useState('');
+  const [isEditCustomCategory, setIsEditCustomCategory] = useState(false);
+  const [editCustomCategoryVal, setEditCustomCategoryVal] = useState('');
+  const [editProdImage, setEditProdImage] = useState('');
+  const [showEditImageField, setShowEditImageField] = useState(false);
 
   // Forms state
   const [showAddProductModal, setShowAddProductModal] = useState(false);
@@ -142,12 +156,47 @@ export default function InventoryManager({
     }));
   };
 
-  // Filtered Products
+  const handleStartEditProduct = (prod: Product) => {
+    setEditingProduct(prod);
+    setEditProdName(prod.name);
+    setEditProdCategory(prod.category);
+    setEditProdDesc(prod.description);
+    setEditProdImage(prod.imageUrl || '');
+    setShowEditImageField(!!prod.imageUrl);
+    setIsEditCustomCategory(false);
+    setEditCustomCategoryVal('');
+  };
+
+  const handleSaveEditProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct) return;
+
+    const finalCategory = isEditCustomCategory ? editCustomCategoryVal.trim() : editProdCategory;
+    if (!finalCategory || !editProdName.trim()) return;
+
+    await onEditProduct(editingProduct.id, {
+      name: editProdName,
+      category: finalCategory,
+      description: editProdDesc,
+      imageUrl: showEditImageField ? editProdImage.trim() : undefined
+    });
+
+    setEditingProduct(null);
+  };
+
+  // Filtered Products (Keyword search by SKU, name, variety name, description or category/type)
   const filteredProducts = products.filter(p => {
     const matchesCategory = selectedCategory === 'All' || p.category === selectedCategory;
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          p.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          varieties.some(v => v.productId === p.id && v.sku.toLowerCase().includes(searchQuery.toLowerCase()));
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return matchesCategory;
+
+    const matchesSearch = p.name.toLowerCase().includes(q) ||
+                          p.description.toLowerCase().includes(q) ||
+                          p.category.toLowerCase().includes(q) ||
+                          varieties.some(v => v.productId === p.id && (
+                            v.sku.toLowerCase().includes(q) ||
+                            v.varietyName.toLowerCase().includes(q)
+                          ));
     return matchesCategory && matchesSearch;
   });
 
@@ -247,7 +296,17 @@ export default function InventoryManager({
         ) : (
           <div className="divide-y divide-slate-100">
             {filteredProducts.map((product) => {
-              const productVarieties = varieties.filter(v => v.productId === product.id);
+              // Filter varieties by product AND by search query if present
+              const productVarieties = varieties
+                .filter(v => v.productId === product.id)
+                .filter(v => {
+                  const q = searchQuery.toLowerCase().trim();
+                  if (!q) return true;
+                  return v.sku.toLowerCase().includes(q) ||
+                         v.varietyName.toLowerCase().includes(q) ||
+                         v.category.toLowerCase().includes(q);
+                });
+                
               const isExpanded = !!expandedProducts[product.id];
               const varietyCount = productVarieties.length;
 
@@ -282,6 +341,32 @@ export default function InventoryManager({
                     </div>
 
                     <div className="flex items-center space-x-3">
+                      {isEditor && (
+                        <div className="flex items-center space-x-1.5 mr-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStartEditProduct(product);
+                            }}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all cursor-pointer"
+                            title="Edit Product Category Details"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (confirm(`Are you sure you want to delete "${product.name}"? This will permanently delete the category and ALL of its varieties / SKUs.`)) {
+                                onDeleteProduct(product.id);
+                              }
+                            }}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all cursor-pointer"
+                            title="Delete Product Category & SKUs"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )}
                       <span className="text-xs font-semibold text-indigo-600 bg-indigo-50/70 px-2.5 py-1 rounded-lg">
                         Manage SKUs
                       </span>
@@ -684,6 +769,129 @@ export default function InventoryManager({
                   className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-xl text-xs font-semibold transition-all shadow-xs cursor-pointer"
                 >
                   Create Variety SKU
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal: Edit Product Category */}
+      {editingProduct && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl border border-slate-100 p-6 max-w-md w-full shadow-lg"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                <Edit2 className="h-5 w-5 text-indigo-600" />
+                Edit Product Category Details
+              </h3>
+              <button 
+                onClick={() => setEditingProduct(null)}
+                className="text-slate-400 hover:text-slate-600 text-sm font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditProduct} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                  Product Name / Title
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Leather Satchel Handbags"
+                  value={editProdName}
+                  onChange={(e) => setEditProdName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white"
+                  required
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    Category Group
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditCustomCategory(!isEditCustomCategory)}
+                    className="text-[11px] text-indigo-600 font-semibold hover:underline"
+                  >
+                    {isEditCustomCategory ? 'Select Existing' : 'Create Custom'}
+                  </button>
+                </div>
+
+                {isEditCustomCategory ? (
+                  <input
+                    type="text"
+                    placeholder="e.g. Wallets, Footwear, Bags"
+                    value={editCustomCategoryVal}
+                    onChange={(e) => setEditCustomCategoryVal(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white"
+                    required
+                  />
+                ) : (
+                  <select
+                    value={editProdCategory}
+                    onChange={(e) => setEditProdCategory(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white"
+                  >
+                    <option value="Handbags">Handbags</option>
+                    <option value="Apparel">Apparel</option>
+                    <option value="Footwear">Footwear</option>
+                    <option value="Accessories">Accessories</option>
+                  </select>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                  Product Description
+                </label>
+                <textarea
+                  placeholder="Details about material, specs, fabric..."
+                  value={editProdDesc}
+                  onChange={(e) => setEditProdDesc(e.target.value)}
+                  rows={3}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white resize-none"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="block text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    Product Image (Optional)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowEditImageField(!showEditImageField)}
+                    className="text-[11px] text-indigo-600 font-semibold hover:underline"
+                  >
+                    {showEditImageField ? 'Hide Field' : 'Add Image URL'}
+                  </button>
+                </div>
+                {showEditImageField && (
+                  <input
+                    type="url"
+                    placeholder="https://images.unsplash.com/... or any image URL"
+                    value={editProdImage}
+                    onChange={(e) => setEditProdImage(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white transition-all animate-fadeIn"
+                  />
+                )}
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-xl text-xs font-semibold transition-all shadow-xs cursor-pointer"
+                >
+                  Save Changes
                 </button>
               </div>
             </form>

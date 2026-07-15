@@ -49,6 +49,9 @@ import {
   addVarietyDoc,
   deleteVarietyDoc,
   addTransactionDoc,
+  updateLocationDoc,
+  updateProductDoc,
+  editTransactionDoc,
   resetCloudDatabase
 } from './lib/dbService';
 import { writeBatch, doc } from 'firebase/firestore';
@@ -78,8 +81,14 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
-      if (user && user.email && ['shreeanguarunachalam@gmail.com', 'surechuchi@gmail.com'].includes(user.email.toLowerCase())) {
-        setIsEditor(true);
+      if (user && user.email) {
+        const emailLower = user.email.toLowerCase();
+        const isAllowed = ['shreeanguarunachalam@gmail.com', 'surechuchi@gmail.com', '2403717673821050@cit.edu.in'].includes(emailLower) || emailLower.endsWith('@cit.edu.in');
+        if (isAllowed) {
+          setIsEditor(true);
+        } else {
+          setIsEditor(false);
+        }
       } else {
         setIsEditor(false);
       }
@@ -95,7 +104,8 @@ export default function App() {
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
       if (user && user.email) {
-        const isAllowed = ['shreeanguarunachalam@gmail.com', 'surechuchi@gmail.com'].includes(user.email.toLowerCase());
+        const emailLower = user.email.toLowerCase();
+        const isAllowed = ['shreeanguarunachalam@gmail.com', 'surechuchi@gmail.com', '2403717673821050@cit.edu.in'].includes(emailLower) || emailLower.endsWith('@cit.edu.in');
         if (isAllowed) {
           setIsEditor(true);
         } else {
@@ -221,6 +231,101 @@ export default function App() {
       ...newProduct
     };
     await addProductDoc(productRecord);
+
+    // Automatically build the category classification tree
+    try {
+      // 1. Check if the root category node exists (parentId is null and name matches the product's category)
+      let rootNode = categoryTree.find(node => node.parentId === null && node.name.toLowerCase() === newProduct.category.toLowerCase());
+      let rootId = '';
+
+      if (!rootNode) {
+        // Create root category node
+        rootId = `node-cat-${Date.now()}`;
+        const newRootNode: CategoryTreeNode = {
+          id: rootId,
+          name: newProduct.category,
+          parentId: null
+        };
+        await addCategoryNode(newRootNode);
+      } else {
+        rootId = rootNode.id;
+      }
+
+      // 2. Check if a child node for the product name already exists under this root
+      const childNode = categoryTree.find(node => node.parentId === rootId && node.name.toLowerCase() === newProduct.name.toLowerCase());
+      if (!childNode) {
+        // Create child node for the product under the root category
+        const newChildNode: CategoryTreeNode = {
+          id: `node-prod-${Date.now()}`,
+          name: newProduct.name,
+          parentId: rootId
+        };
+        await addCategoryNode(newChildNode);
+      }
+    } catch (err) {
+      console.warn("Failed to auto-update category tree:", err);
+    }
+  };
+
+  // Edit Product Category (with cached variety productName and category updates)
+  const handleEditProduct = async (productId: string, updatedFields: Omit<Product, 'id'>) => {
+    const batch = writeBatch(db);
+    
+    // 1. Update product doc
+    const productRef = doc(db, 'products', productId);
+    batch.set(productRef, { id: productId, ...updatedFields });
+
+    // 2. Update all associated varieties to keep productName and category synchronized
+    const associatedVars = varieties.filter(v => v.productId === productId);
+    associatedVars.forEach(v => {
+      const varRef = doc(db, 'varieties', v.id);
+      batch.update(varRef, {
+        productName: updatedFields.name,
+        category: updatedFields.category
+      });
+    });
+
+    // 3. Update corresponding node in categoryTree if exists
+    const oldProductObj = products.find(p => p.id === productId);
+    if (oldProductObj) {
+      const prodNode = categoryTree.find(n => n.name.toLowerCase() === oldProductObj.name.toLowerCase());
+      if (prodNode) {
+        const nodeRef = doc(db, 'categoryTree', prodNode.id);
+        batch.update(nodeRef, { name: updatedFields.name });
+      }
+    }
+
+    await batch.commit();
+  };
+
+  // Delete Product Category (along with varieties, stock, and categoryTree node)
+  const handleDeleteProduct = async (productId: string) => {
+    const associatedVars = varieties.filter(v => v.productId === productId);
+    const varIds = associatedVars.map(v => v.id);
+    const locationIds = locations.map(l => l.id);
+    
+    const batch = writeBatch(db);
+    // Delete the product
+    batch.delete(doc(db, 'products', productId));
+    
+    // Delete associated varieties and stock levels
+    varIds.forEach(vId => {
+      batch.delete(doc(db, 'varieties', vId));
+      locationIds.forEach(locId => {
+        batch.delete(doc(db, 'stock', `${vId}_${locId}`));
+      });
+    });
+
+    // Delete corresponding node in the category tree if exists
+    const productObj = products.find(p => p.id === productId);
+    if (productObj) {
+      const prodNode = categoryTree.find(n => n.name.toLowerCase() === productObj.name.toLowerCase());
+      if (prodNode) {
+        batch.delete(doc(db, 'categoryTree', prodNode.id));
+      }
+    }
+
+    await batch.commit();
   };
 
   // 3. Action: Register a Variety SKU and seed initial stock
@@ -240,6 +345,16 @@ export default function App() {
   const handleDeleteVariety = async (varietyId: string) => {
     const locationIds = locations.map(l => l.id);
     await deleteVarietyDoc(varietyId, locationIds);
+  };
+
+  // Edit existing Transaction Log (and delta corrective stock update)
+  const handleEditTransaction = async (oldTx: Transaction, newTx: Transaction) => {
+    await editTransactionDoc(oldTx, newTx, stock);
+  };
+
+  // Change location name / address
+  const handleUpdateLocation = async (updatedLoc: Location) => {
+    await updateLocationDoc(updatedLoc);
   };
 
   // 5. Core Engine: Add and Process worker report transactions (Batch Sync)
@@ -409,13 +524,53 @@ export default function App() {
           </div>
         </div>
 
-        {/* Mobile menu toggle */}
-        <button 
-          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          className="lg:hidden p-1.5 rounded bg-slate-100 text-slate-700"
-        >
-          {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </button>
+        {/* Mobile profile & toggle */}
+        <div className="flex items-center space-x-2.5 lg:hidden">
+          {currentUser && !currentUser.isAnonymous ? (
+            <div className="flex items-center gap-1.5">
+              <button 
+                onClick={handleSignOut}
+                title={`Signed in as ${currentUser.email}. Click to sign out.`}
+                className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 px-2.5 py-1.5 rounded-xl text-[10px] font-bold cursor-pointer transition-all border border-slate-200 shrink-0"
+              >
+                {currentUser.photoURL ? (
+                  <img 
+                    src={currentUser.photoURL} 
+                    alt={currentUser.displayName || 'User'} 
+                    className="h-4 w-4 rounded-full border border-white"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="h-4 w-4 rounded-full bg-indigo-600 text-white font-bold text-[8px] flex items-center justify-center">
+                    {(currentUser.displayName || currentUser.email || 'U')[0].toUpperCase()}
+                  </div>
+                )}
+                <span>Sign Out</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleGoogleSignIn}
+              title="Sign In with Google"
+              className="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-xl font-bold text-[10px] cursor-pointer flex items-center gap-1.5 border border-indigo-500 shrink-0 transition-all shadow-xs"
+            >
+              <svg className="h-3 w-3 text-white" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.85z" fill="currentColor" />
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.85c.87-2.6 3.3-4.53 6.16-4.53z" fill="currentColor" />
+              </svg>
+              <span>Sign In</span>
+            </button>
+          )}
+
+          <button 
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            className="p-1.5 rounded bg-slate-100 text-slate-700 hover:bg-slate-200 transition-all cursor-pointer"
+          >
+            {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
+        </div>
       </header>
 
       {/* Main Body Grid */}
@@ -607,7 +762,71 @@ export default function App() {
 
         {/* Mobile Navigation Dropdown Menu */}
         {isMobileMenuOpen && (
-          <div className="lg:hidden bg-white border-b border-slate-200 p-4 space-y-3 shadow-md" id="mobile-navigation-dropdown">
+          <div className="lg:hidden bg-white border-b border-slate-200 p-4 space-y-3.5 shadow-md animate-fadeIn" id="mobile-navigation-dropdown">
+            
+            {/* Mobile Auth & Security Info Card */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
+              <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                <span>Security & Authorization</span>
+                {currentUser && !currentUser.isAnonymous ? (
+                  isEditor ? (
+                    <span className="text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">Editor</span>
+                  ) : (
+                    <span className="text-amber-600 font-bold bg-amber-50 px-1.5 py-0.5 rounded">Read-Only</span>
+                  )
+                ) : (
+                  <span className="text-slate-500 font-bold bg-slate-100 px-1.5 py-0.5 rounded">Guest</span>
+                )}
+              </div>
+              
+              {currentUser && !currentUser.isAnonymous ? (
+                <div className="flex items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {currentUser.photoURL ? (
+                      <img 
+                        src={currentUser.photoURL} 
+                        alt={currentUser.displayName || 'User'} 
+                        className="h-8 w-8 rounded-full border border-slate-200"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div className="h-8 w-8 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center">
+                        {(currentUser.displayName || currentUser.email || 'U')[0].toUpperCase()}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-800 truncate leading-tight">{currentUser.displayName || 'TSM User'}</p>
+                      <p className="text-[10px] text-slate-400 truncate leading-tight mt-0.5">{currentUser.email}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleSignOut}
+                    className="text-[10px] text-rose-600 hover:text-rose-500 hover:underline font-bold shrink-0 cursor-pointer"
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  <p className="text-[11px] text-slate-500 leading-normal">
+                    You are currently in guest mode. Sign in to add or edit inventory items.
+                  </p>
+                  <button
+                    onClick={handleGoogleSignIn}
+                    className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2 px-3 rounded-lg transition-all shadow-xs cursor-pointer flex items-center justify-center gap-2 border border-indigo-500"
+                  >
+                    <svg className="h-3.5 w-3.5 text-white" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.85z" fill="currentColor" />
+                      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.85c.87-2.6 3.3-4.53 6.16-4.53z" fill="currentColor" />
+                    </svg>
+                    Sign In with Google
+                  </button>
+                </div>
+              )}
+            </div>
+
             <nav className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
@@ -777,6 +996,8 @@ service cloud.firestore {
                   locations={locations}
                   stock={stock}
                   onAddProduct={handleAddProduct}
+                  onEditProduct={handleEditProduct}
+                  onDeleteProduct={handleDeleteProduct}
                   onAddVariety={handleAddVariety}
                   onDeleteVariety={handleDeleteVariety}
                   isEditor={isEditor}
@@ -815,7 +1036,11 @@ service cloud.firestore {
               )}
 
               {activeTab === 'settings' && (
-                <SettingsTab locations={locations} isEditor={isEditor} />
+                <SettingsTab 
+                  locations={locations} 
+                  isEditor={isEditor} 
+                  onUpdateLocation={handleUpdateLocation}
+                />
               )}
             </>
           )}

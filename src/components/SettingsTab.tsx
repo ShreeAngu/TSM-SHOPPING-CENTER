@@ -8,7 +8,8 @@ import {
   Check, 
   AlertCircle, 
   MapPin, 
-  Info 
+  Info,
+  Edit2
 } from 'lucide-react';
 import { Location } from '../types';
 import { 
@@ -20,9 +21,10 @@ import {
 interface SettingsTabProps {
   locations: Location[];
   isEditor?: boolean;
+  onUpdateLocation?: (location: Location) => Promise<void>;
 }
 
-export default function SettingsTab({ locations, isEditor = false }: SettingsTabProps) {
+export default function SettingsTab({ locations, isEditor = false, onUpdateLocation }: SettingsTabProps) {
   // Determine current active counts from locations
   const currentWarehouseCount = locations.filter(l => l.type === 'warehouse').length;
   const currentStoreCount = locations.filter(l => l.type === 'store').length;
@@ -32,6 +34,9 @@ export default function SettingsTab({ locations, isEditor = false }: SettingsTab
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncSuccess, setSyncSuccess] = useState<boolean>(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+
+  // Editing location detail state
+  const [editingLoc, setEditingLoc] = useState<Location | null>(null);
 
   // Keep state in sync with actual loaded database counts
   useEffect(() => {
@@ -233,25 +238,40 @@ export default function SettingsTab({ locations, isEditor = false }: SettingsTab
               <div className="space-y-2">
                 <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Warehouses ({previewWarehouses.length})</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {previewWarehouses.map((wh) => (
-                    <div 
-                      key={wh.id} 
-                      className="border border-slate-100 bg-orange-50/20 rounded-xl p-3.5 space-y-1.5 flex flex-col justify-between"
-                    >
-                      <div className="flex items-start gap-2">
-                        <div className="p-1.5 bg-orange-100 text-orange-600 rounded-lg">
-                          <Warehouse className="h-3.5 w-3.5" />
+                  {previewWarehouses.map((wh) => {
+                    // Match with actual database edited values if present
+                    const dbLoc = locations.find(l => l.id === wh.id) || wh;
+                    return (
+                      <div 
+                        key={dbLoc.id} 
+                        className="border border-slate-100 bg-orange-50/20 rounded-xl p-3.5 space-y-1.5 flex flex-col justify-between"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2 min-w-0">
+                            <div className="p-1.5 bg-orange-100 text-orange-600 rounded-lg shrink-0">
+                              <Warehouse className="h-3.5 w-3.5" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-slate-700 leading-tight truncate">{dbLoc.name}</p>
+                              <p className="text-[10px] font-mono text-slate-400 mt-0.5">{dbLoc.id}</p>
+                            </div>
+                          </div>
+                          {isEditor && (
+                            <button
+                              onClick={() => setEditingLoc(dbLoc)}
+                              className="p-1 rounded-md text-slate-400 hover:text-indigo-600 hover:bg-white transition-all shrink-0 cursor-pointer"
+                              title="Edit warehouse name & address"
+                            >
+                              <Edit2 className="h-3 w-3" />
+                            </button>
+                          )}
                         </div>
-                        <div>
-                          <p className="text-xs font-bold text-slate-700 leading-tight">{wh.name}</p>
-                          <p className="text-[10px] font-mono text-slate-400 mt-0.5">{wh.id}</p>
-                        </div>
+                        <p className="text-[10px] text-slate-500 flex items-center gap-1 mt-2 truncate">
+                          <MapPin className="h-3 w-3 text-slate-400 shrink-0" /> {dbLoc.address}
+                        </p>
                       </div>
-                      <p className="text-[10px] text-slate-500 flex items-center gap-1 mt-2">
-                        <MapPin className="h-3 w-3 text-slate-400" /> {wh.address}
-                      </p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -259,31 +279,112 @@ export default function SettingsTab({ locations, isEditor = false }: SettingsTab
               <div className="space-y-2">
                 <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Retail Stores ({previewStores.length})</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {previewStores.map((st) => (
-                    <div 
-                      key={st.id} 
-                      className="border border-slate-100 bg-blue-50/20 rounded-xl p-3.5 space-y-1.5 flex flex-col justify-between"
-                    >
-                      <div className="flex items-start gap-2">
-                        <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg">
-                          <Store className="h-3.5 w-3.5" />
+                  {previewStores.map((st) => {
+                    // Match with actual database edited values if present
+                    const dbLoc = locations.find(l => l.id === st.id) || st;
+                    return (
+                      <div 
+                        key={dbLoc.id} 
+                        className="border border-slate-100 bg-blue-50/20 rounded-xl p-3.5 space-y-1.5 flex flex-col justify-between"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2 min-w-0">
+                            <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg shrink-0">
+                              <Store className="h-3.5 w-3.5" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-slate-700 leading-tight truncate">{dbLoc.name}</p>
+                              <p className="text-[10px] font-mono text-slate-400 mt-0.5">{dbLoc.id}</p>
+                            </div>
+                          </div>
+                          {isEditor && (
+                            <button
+                              onClick={() => setEditingLoc(dbLoc)}
+                              className="p-1 rounded-md text-slate-400 hover:text-indigo-600 hover:bg-white transition-all shrink-0 cursor-pointer"
+                              title="Edit store name & address"
+                            >
+                              <Edit2 className="h-3 w-3" />
+                            </button>
+                          )}
                         </div>
-                        <div>
-                          <p className="text-xs font-bold text-slate-700 leading-tight">{st.name}</p>
-                          <p className="text-[10px] font-mono text-slate-400 mt-0.5">{st.id}</p>
-                        </div>
+                        <p className="text-[10px] text-slate-500 flex items-center gap-1 mt-2 truncate">
+                          <MapPin className="h-3 w-3 text-slate-400 shrink-0" /> {dbLoc.address}
+                        </p>
                       </div>
-                      <p className="text-[10px] text-slate-500 flex items-center gap-1 mt-2">
-                        <MapPin className="h-3 w-3 text-slate-400" /> {st.address}
-                      </p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Edit Location Modal */}
+      {editingLoc && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn" id="edit-location-modal">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-slate-100 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                {editingLoc.type === 'warehouse' ? <Warehouse className="h-5 w-5 text-orange-500" /> : <Store className="h-5 w-5 text-blue-500" />}
+                Edit Node Details ({editingLoc.id})
+              </h3>
+              <button 
+                onClick={() => setEditingLoc(null)}
+                className="text-slate-400 hover:text-slate-600 font-bold text-xs cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                  Node Name
+                </label>
+                <input
+                  type="text"
+                  value={editingLoc.name}
+                  onChange={(e) => setEditingLoc({ ...editingLoc, name: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                  Physical Address
+                </label>
+                <input
+                  type="text"
+                  value={editingLoc.address}
+                  onChange={(e) => setEditingLoc({ ...editingLoc, address: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3 mt-4">
+              <button
+                onClick={() => setEditingLoc(null)}
+                className="px-3.5 py-1.5 border border-slate-200 rounded-lg text-slate-600 font-bold text-xs hover:bg-slate-50 transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (onUpdateLocation) {
+                    await onUpdateLocation(editingLoc);
+                  }
+                  setEditingLoc(null);
+                }}
+                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg text-xs transition-all cursor-pointer"
+              >
+                Save Details
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
