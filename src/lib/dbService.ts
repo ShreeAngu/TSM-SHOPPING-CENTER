@@ -103,17 +103,10 @@ export async function seedDatabaseIfNeeded() {
 
     if (hasMockData) {
       console.log('Mock data detected in Firestore. Initiating automatic removal and database clearing...');
-      const batch = writeBatch(db);
 
-      // Clear all mock data collections
+      // Clear all mock data collections safely in chunks
       const collectionsToClear = ['locations', 'products', 'varieties', 'stock', 'transactions', 'categoryTree'];
-      for (const collName of collectionsToClear) {
-        const snap = await getDocs(collection(db, collName));
-        snap.forEach(document => {
-          batch.delete(doc(db, collName, document.id));
-        });
-      }
-      await batch.commit();
+      await clearCollectionsInChunks(collectionsToClear);
 
       // Seed ONLY the clean physical locations blueprint so the system is fully operational
       const locBatch = writeBatch(db);
@@ -648,31 +641,47 @@ export async function revokeTransactionDoc(tx: Transaction, stockLevels: StockLe
   }
 }
 
+/**
+ * Safely clears multiple collections in chunks of 400 documents per writeBatch
+ * to avoid exceeding Firestore's limit of 500 write operations in a single batch.
+ */
+export async function clearCollectionsInChunks(collectionNames: string[]) {
+  let batch = writeBatch(db);
+  let operationCount = 0;
+
+  for (const collName of collectionNames) {
+    const snap = await getDocs(collection(db, collName));
+    for (const document of snap.docs) {
+      batch.delete(doc(db, collName, document.id));
+      operationCount++;
+
+      if (operationCount >= 400) {
+        await batch.commit();
+        batch = writeBatch(db);
+        operationCount = 0;
+      }
+    }
+  }
+
+  if (operationCount > 0) {
+    await batch.commit();
+  }
+}
+
 // Wipe & Hard Reset Cloud Firestore
 export async function resetCloudDatabase(onlyStocks?: boolean) {
   try {
-    const batch = writeBatch(db);
-
     // Delete existing documents across selected collections
     const collectionsToClear = onlyStocks
       ? ['stock', 'transactions']
       : ['locations', 'products', 'varieties', 'stock', 'transactions', 'categoryTree'];
 
-    for (const collName of collectionsToClear) {
-      const snap = await getDocs(collection(db, collName));
-      snap.forEach(document => {
-        batch.delete(doc(db, collName, document.id));
-      });
-    }
-
-    // Commit deletion
-    await batch.commit();
+    await clearCollectionsInChunks(collectionsToClear);
 
     if (!onlyStocks) {
       // Re-seed ONLY the clean physical locations blueprint so the system is fully operational
       const seedBatch = writeBatch(db);
       INITIAL_LOCATIONS.forEach(loc => seedBatch.set(doc(db, 'locations', loc.id), loc));
-
       await seedBatch.commit();
     }
   } catch (error) {

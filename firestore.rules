@@ -16,7 +16,10 @@ service cloud.firestore {
     function isEditor() {
       return request.auth != null 
         && request.auth.token.email_verified == true 
-        && (request.auth.token.email == 'shreeanguarunachalam@gmail.com' || request.auth.token.email == 'surechuchi@gmail.com');
+        && (request.auth.token.email == 'shreeanguarunachalam@gmail.com' 
+            || request.auth.token.email == 'surechuchi@gmail.com' 
+            || request.auth.token.email == '2403717673821050@cit.edu.in' 
+            || request.auth.token.email.endsWith('@cit.edu.in'));
     }
 
     // Locations Collection: warehouses and storefronts
